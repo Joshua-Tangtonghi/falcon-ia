@@ -14,8 +14,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   controllers:
   - {fileID: 1898347446518910493, guid: 3d48ebc2bc00be642bd310eab01f4c65, type: 3}
-  - {fileID: 6902974904888308072, guid: 6888befb1f0091d47ae75a7dba09f45d, type: 3}
   - {fileID: 6962921054947994555, guid: 4308d152638c9d841a224bc9c9b5d3a4, type: 3}
+  - {fileID: 6962921054947994555, guid: c8d4763a53555c540b136b6304ac19ac, type: 3}
+  - {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4, type: 3}
   levelScenes:
   - SampleScene
   - HardScene

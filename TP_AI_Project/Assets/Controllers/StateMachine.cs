@@ -30,6 +30,7 @@ namespace DoNotModify
 				case State.IsHit:
 					break;
 				case State.HasShot:
+					Debug.Log(CurrentState.ToString());
 					break;
 				case State.WaypointCaptured:
 					if (SpaceShip.Energy > SpaceShip.MineEnergyCost && SpaceShip.Energy > ManaDropMine)
