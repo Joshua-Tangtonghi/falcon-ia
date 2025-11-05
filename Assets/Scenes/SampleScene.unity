@@ -2771,6 +2771,41 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 0}
     m_Modifications:
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: _epsilon
+      value: 0.7
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: _loadOnStart
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: penaltyOnHit
+      value: -1
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: rewardForShot
+      value: -0.12
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: rewardPerScore
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: rewardForDropMine
+      value: -0.2
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: rewardForShockwave
+      value: -0.4
+      objectReference: {fileID: 0}
     - target: {fileID: 2584746060613139601, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
       propertyPath: m_Name
