@@ -42,7 +42,16 @@ namespace AI
         [Header("Runtime")]
         public bool TrainingMode = true;
         public string SaveFileName = "qtable.json";
-        [SerializeField] private bool _loadOnStart = false;
+        // centralized autoload is handled by QLearningTrainer
+
+        [Header("Energy management")]
+        [SerializeField] private bool useEnergyPenalty = true;
+        [SerializeField, Range(0f, 1f)] private float energyHighThreshold = 0.8f;
+        [SerializeField, Range(0f, 1f)] private float energyLowThreshold = 0.15f;
+        [Tooltip("Penalty applied proportionally when energy is above the high threshold (negative to punish hoarding).")]
+        [SerializeField] private float penaltyHighEnergy = -0.02f;
+        [Tooltip("Penalty applied proportionally when energy is below the low threshold (negative to punish starving).")]
+        [SerializeField] private float penaltyLowEnergy = -0.05f;
 
         // Exposed properties pour modularité
         public float Alpha { get => _alpha; set { _alpha = value; if (agent != null) agent.Alpha = value; } }
@@ -50,7 +59,6 @@ namespace AI
         public float Epsilon { get => _epsilon; set { _epsilon = value; if (agent != null) agent.Epsilon = value; } }
         public float EpsilonDecay { get => _epsilonDecay; set { _epsilonDecay = value; if (agent != null) agent.EpsilonDecay = value; } }
         public float MinEpsilon { get => _minEpsilon; set { _minEpsilon = value; if (agent != null) agent.MinEpsilon = value; } }
-        public bool LoadOnStart { get => _loadOnStart; set { _loadOnStart = value; } }
 
         private QLearningAgent agent;
 
@@ -83,10 +91,6 @@ namespace AI
             agent.Initialize(actionCount, _alpha, _gamma, _epsilon);
             agent.EpsilonDecay = _epsilonDecay;
             agent.MinEpsilon = _minEpsilon;
-            if (_loadOnStart)
-            {
-                agent.Load(SaveFileName);
-            }
 
             prevState = null;
             prevAction = -1;
@@ -297,6 +301,30 @@ namespace AI
                 // penalty for being hit (can be negative)
                 if (hitDiff > 0) reward += hitDiff * penaltyOnHit;
 
+                // --- Energy management penalties (mana consumption) ---
+                if (useEnergyPenalty)
+                {
+                    float e = Mathf.Clamp01(ship.Energy);
+                    if (e > energyHighThreshold)
+                    {
+                        // scale penalty with how far above threshold
+                        float factor = (e - energyHighThreshold) / Mathf.Max(1e-6f, 1f - energyHighThreshold);
+                        float pen = penaltyHighEnergy * factor;
+                        reward += pen;
+                        if (DebugActions)
+                            Debug.Log($"[QL] Energy high penalty e={e:F2} thr={energyHighThreshold:F2} -> {pen:F4}");
+                    }
+                    if (e < energyLowThreshold)
+                    {
+                        // scale penalty with how far below threshold
+                        float factor = (energyLowThreshold - e) / Mathf.Max(1e-6f, energyLowThreshold);
+                        float pen = penaltyLowEnergy * factor;
+                        reward += pen;
+                        if (DebugActions)
+                            Debug.Log($"[QL] Energy low penalty e={e:F2} thr={energyLowThreshold:F2} -> {pen:F4}");
+                    }
+                }
+
                 agent.Learn(prevState, prevAction, reward, state, false);
             }
 
@@ -337,5 +365,27 @@ namespace AI
             if (agent == null) agent = new QLearningAgent();
             agent.Load(SaveFileName);
         }
+
+        public void ApplyHyperParamsAndReset(float alpha, float gamma, float epsilonStart, float epsilonDecay, float minEpsilon, bool resetTable)
+        {
+            _alpha = alpha; _gamma = gamma; _epsilon = epsilonStart; _epsilonDecay = epsilonDecay; _minEpsilon = minEpsilon;
+            if (agent == null || resetTable)
+            {
+                agent = new QLearningAgent();
+                int actionCount = 3 * 3 * 4; // keep action mapping consistent
+                agent.Initialize(actionCount, _alpha, _gamma, _epsilon);
+                agent.EpsilonDecay = _epsilonDecay;
+                agent.MinEpsilon = _minEpsilon;
+            }
+            else
+            {
+                agent.Alpha = _alpha;
+                agent.Gamma = _gamma;
+                agent.Epsilon = _epsilon;
+                agent.EpsilonDecay = _epsilonDecay;
+                agent.MinEpsilon = _minEpsilon;
+            }
+        }
+
     }
 }

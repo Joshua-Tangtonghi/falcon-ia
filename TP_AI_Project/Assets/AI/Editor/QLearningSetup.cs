@@ -17,7 +17,6 @@ namespace AI.Editor
             // Configure some readable defaults
             controller.TrainingMode = true;
             controller.SaveFileName = "qtable.json";
-            controller.LoadOnStart = false;
 
             // Ensure AI folder exists
             string prefPath = "Assets/AI/QLearningController.prefab";

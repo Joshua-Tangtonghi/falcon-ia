@@ -96,8 +96,23 @@ namespace DoNotModify
 
 		void Update()
 		{
+			// Keep only input and non-physics toggles here
+			if (Input.GetKey(KeyCode.LeftControl) && Input.GetKeyDown(KeyCode.R)) {
+				if (GameConfiguration.Instance == null) {
+					SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+				} else {
+					SceneManager.LoadScene("Launcher");
+				}
+				enabled = false;
+			}
+		}
+
+
+		void FixedUpdate()
+		{
 			if (_gameState == GameState.RUNNING) {
-				_gameData.timeLeft -= Time.deltaTime;
+				// Advance timer on fixed step to align with physics
+				_gameData.timeLeft -= Time.fixedDeltaTime;
 				if (_gameData.timeLeft <= 0.0f) {
 					_gameData.timeLeft = 0.0f;
 					_gameState = GameState.ENDED;
@@ -106,17 +121,9 @@ namespace DoNotModify
 							player.controller.enabled = false;
 						}
 					}
+					// Pause game when ended
 					Time.timeScale = 0.0f;
 				}
-			}
-
-			if (Input.GetKey(KeyCode.LeftControl) && Input.GetKeyDown(KeyCode.R)) {
-				if (GameConfiguration.Instance == null) {
-					SceneManager.LoadScene(SceneManager.GetActiveScene().name);
-				} else {
-					SceneManager.LoadScene("Launcher");
-				}
-				enabled = false;
 			}
 		}
 
