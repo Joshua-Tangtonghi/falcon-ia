@@ -914,15 +914,26 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   controller: {fileID: 1202758643}
   AutoLoad: 0
-  AutoSaveOnEnd: 1
+  AutoSaveOnEnd: 0
   SaveFileName: qtable.json
   AutoRestartOnEnd: 1
   TrainingTimeScale: 100
-  AutoSaveEveryNEpisodes: 10
+  AutoSaveEveryNEpisodes: 500
   MovingAverageWindow: 20
   PersistAcrossEpisodes: 1
   PreserveTimeScaleAcrossReloads: 1
   ResetTimeScaleOnReload: 100
+  EvolutionaryEnabled: 1
+  PopulationSize: 6
+  EpisodesPerCandidate: 3
+  MaxGenerations: 0
+  ElitesToKeep: 1
+  MutationSigma: 0.15
+  AlphaRange: {x: 0.05, y: 1}
+  GammaRange: {x: 0.5, y: 0.9999}
+  EpsilonStartRange: {x: 0.01, y: 1}
+  EpsilonDecayRange: {x: 0.9, y: 0.99999}
+  MinEpsilonRange: {x: 0, y: 0.2}
 --- !u!4 &375097848
 Transform:
   m_ObjectHideFlags: 0
@@ -2771,6 +2782,21 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 0}
     m_Modifications:
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: DebugActions
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: TrainingMode
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: useEnergyPenalty
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: 2584746060613139601, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
       propertyPath: m_Name

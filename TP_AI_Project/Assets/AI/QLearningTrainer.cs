@@ -400,7 +400,28 @@ namespace AI
                 controller.ApplyHyperParamsAndReset(_current.alpha, _current.gamma, _current.epsStart, _current.epsDecay, _current.minEps, resetTable);
                 if (!resetTable)
                 {
-                    controller.LoadAgent(); // continue from previous episodes' Q-table
+                    // Only attempt to load an existing q-table file; if absent, skip silently to avoid warnings
+                    try
+                    {
+                        string path = System.IO.Path.Combine(Application.persistentDataPath, _current.fileName);
+                        if (System.IO.File.Exists(path))
+                        {
+                            controller.LoadAgent(); // continue from previous episodes' Q-table
+                        }
+                        else
+                        {
+                            // no file to load — skip without warning
+                            if (AutoSaveOnEnd)
+                            {
+                                // if autosave is enabled but file missing, still try to load and let controller report any issue
+                                controller.LoadAgent();
+                            }
+                        }
+                    }
+                    catch (System.Exception e)
+                    {
+                        Debug.LogWarning($"[EVOL] Failed to load candidate table {_current.fileName}: {e.Message}");
+                    }
                 }
                 Debug.Log($"[EVOL] Starting Gen {_current.generation} Cand {_current.index} (epsiode {_current.episodesRun + 1}/{EpisodesPerCandidate}) α={_current.alpha:F3} γ={_current.gamma:F4} ε0={_current.epsStart:F2} decay={_current.epsDecay:F5} εmin={_current.minEps:F2} -> file={_current.fileName}");
             }
@@ -410,18 +431,48 @@ namespace AI
         {
             if (_current == null) return;
 
+            // Ensure current candidate q-table is saved when needed
+            // (e.g. when it becomes best or when its evaluation finishes). Respect AutoSaveOnEnd
+            void SaveCandidateTable(string candidateFile, bool forceSave = false)
+            {
+                try
+                {
+                    if (controller == null) return;
+                    // Respect the AutoSaveOnEnd setting unless explicitly forced
+                    if (!AutoSaveOnEnd && !forceSave) return;
+                    string prev = controller.SaveFileName;
+                    controller.SaveFileName = candidateFile;
+                    controller.SaveAgent();
+                    controller.SaveFileName = prev;
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogWarning($"[EVOL] Failed to save candidate table {candidateFile}: {e.Message}");
+                }
+            }
+
             // update global best if improved by winrate then avg score
             if (_bestEver == null || IsBetter(_current, _bestEver))
             {
                 _bestEver = _current;
+                // save current candidate table to ensure file exists (force regardless of AutoSaveOnEnd)
+                SaveCandidateTable(_current.fileName, true);
                 // Copy current candidate's table to public SaveFileName for convenience
                 TryCopyCandidateToPublic(_current.fileName, SaveFileName);
-                Debug.Log($"[EVOL] New BEST so far -> Gen {_current.generation} Cand {_current.index} WR={_current.WinRate:P1} Avg={_current.AvgScore:F2} (α={_current.alpha:F3}, γ={_current.gamma:F4}, ε0={_current.epsStart:F2}, decay={_current.epsDecay:F5}, εmin={_current.minEps:F2})");
+                Debug.Log($"[EVOL] New BEST so far -> Gen {_current.generation} Cand {_current.index} WR={_current.WinRate:P1} Avg={_current.AvgScore:F2} (α={_current.alpha:F3}, γ={_current.gamma:F4}, ε0={_current.epsStart:F2} decay={_current.epsDecay:F5} εmin={_current.minEps:F2})");
             }
 
             // if candidate finished its episodes -> move to next
             if (_current.episodesRun >= Mathf.Max(1, EpisodesPerCandidate))
             {
+                // ensure candidate table is saved before we advance
+                // only save at end of candidate if AutoSaveOnEnd is enabled or if this candidate is the current best
+                bool isBest = (_bestEver == _current);
+                if (AutoSaveOnEnd || isBest)
+                {
+                    SaveCandidateTable(_current.fileName, /*forceSave*/ isBest);
+                }
+
                 Debug.Log($"[EVOL] Candidate over -> Gen {_current.generation} Cand {_current.index} Summary: WR={_current.WinRate:P1} Avg={_current.AvgScore:F2} BestScore={_current.bestScore:F1}");
                 _currentIdx++;
                 if (_currentIdx >= _population.Count)
