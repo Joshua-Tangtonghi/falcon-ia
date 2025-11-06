@@ -918,11 +918,9 @@ MonoBehaviour:
   SaveFileName: qtable.json
   AutoRestartOnEnd: 1
   TrainingTimeScale: 50
+  PersistAcrossEpisodes: 1
   AutoSaveEveryNEpisodes: 500
   MovingAverageWindow: 20
-  PersistAcrossEpisodes: 1
-  PreserveTimeScaleAcrossReloads: 1
-  ResetTimeScaleOnReload: 50
   EvolutionaryEnabled: 1
   PopulationSize: 6
   EpisodesPerCandidate: 3
@@ -934,6 +932,7 @@ MonoBehaviour:
   EpsilonStartRange: {x: 0.01, y: 1}
   EpsilonDecayRange: {x: 0.9, y: 0.99999}
   MinEpsilonRange: {x: 0, y: 0.2}
+  SaveOnlyOneBest: 1
 --- !u!4 &375097848
 Transform:
   m_ObjectHideFlags: 0
@@ -2794,7 +2793,57 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
+      propertyPath: circleRadius
+      value: 4
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: penaltyOnHit
+      value: -1
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: livingPenalty
+      value: -0.05
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: penaltyLowEnergy
+      value: -0.1
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
       propertyPath: useEnergyPenalty
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: penaltyHighEnergy
+      value: -0.1
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: terminalWinReward
+      value: 1.5
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: energyHighThreshold
+      value: 0.95
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: shootHitTimeTolerance
+      value: 0.5
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: thrustLevels.Array.size
+      value: 2
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: 'thrustLevels.Array.data[1]'
       value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 2584746060613139601, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
