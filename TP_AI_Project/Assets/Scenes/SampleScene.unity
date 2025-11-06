@@ -917,12 +917,12 @@ MonoBehaviour:
   AutoSaveOnEnd: 0
   SaveFileName: qtable.json
   AutoRestartOnEnd: 1
-  TrainingTimeScale: 100
+  TrainingTimeScale: 50
   AutoSaveEveryNEpisodes: 500
   MovingAverageWindow: 20
   PersistAcrossEpisodes: 1
   PreserveTimeScaleAcrossReloads: 1
-  ResetTimeScaleOnReload: 100
+  ResetTimeScaleOnReload: 50
   EvolutionaryEnabled: 1
   PopulationSize: 6
   EpisodesPerCandidate: 3
@@ -2785,7 +2785,7 @@ PrefabInstance:
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
       propertyPath: DebugActions
-      value: 0
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}

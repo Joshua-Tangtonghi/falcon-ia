@@ -11,6 +11,7 @@ namespace Teams.ExampleTeam
 		[SerializeField] private float approachThrust = 0.4f;
 		[SerializeField] private float slowThrust = 0.2f;
 		[SerializeField] private float approachFactor = 1.2f;
+		[SerializeField] private float steeringOvershoot = 1.2f; // utilisé par AimingHelpers
 
 		[Header("Avoidance")]
 		[SerializeField] private float avoidThrust = 0.5f;
@@ -21,6 +22,7 @@ namespace Teams.ExampleTeam
 		[SerializeField] private float attackRange = 6.0f;
 		[SerializeField] private float attackAngleThreshold = 15.0f;
 		[SerializeField] private float shootCooldown = 1.0f;
+		[SerializeField] private float hitTimeTolerance = 0.25f; // utilisé par AimingHelpers pour cible mobile
 
 		// Properties pour modularité
 		public float FullThrust { get => fullThrust; set => fullThrust = value; }
@@ -102,12 +104,12 @@ namespace Teams.ExampleTeam
 			if (enemy != null)
 			{
 				float dist = (enemy.Position - ship.Position).magnitude;
-				float desiredOrientToEnemy = ComputeOrientationTowards(ship.Position, enemy.Position);
-				float angDiff = Mathf.Abs(Mathf.DeltaAngle(ship.Orientation, desiredOrientToEnemy));
+				// Utiliser l’orientation avec overshoot pour éviter l’orbite
+				float desiredOrientToEnemy = AimingHelpers.ComputeSteeringOrient(ship, enemy.Position, steeringOvershoot);
+				bool canShootNow = AimingHelpers.CanHit(ship, enemy.Position, enemy.Velocity, hitTimeTolerance);
 				if (dist <= AttackRange)
 				{
-					// Attack behaviour
-					bool canShoot = (_shootTimer <= 0f) && (ship.Energy > ship.ShootEnergyCost) && (angDiff <= AttackAngleThreshold);
+					bool canShoot = (_shootTimer <= 0f) && (ship.Energy > ship.ShootEnergyCost) && canShootNow;
 					if (canShoot)
 					{
 						_shootTimer = ShootCooldown;
@@ -133,7 +135,8 @@ namespace Teams.ExampleTeam
 			}
 
 			float distance = (target.Position - ship.Position).magnitude;
-			float desiredOrientWaypoint = ComputeOrientationTowards(ship.Position, target.Position);
+			// Utiliser l’orientation avec overshoot pour éviter l’orbite
+			float desiredOrientWaypoint = AimingHelpers.ComputeSteeringOrient(ship, target.Position, steeringOvershoot);
 			float thrustToUse = distance > target.Radius * ApproachFactor ? FullThrust : ApproachThrust;
 			// slow down a bit when very close
 			if (distance <= target.Radius * 0.5f) thrustToUse = SlowThrust;

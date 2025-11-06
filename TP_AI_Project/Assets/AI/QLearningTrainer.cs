@@ -3,64 +3,62 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using System.Collections.Generic;
 
-
 namespace AI
 {
-    // Simple trainer pour faciliter l'entraînement en Play Mode.
-    // Attacher à un GameObject dans la scène et assigner le contrôleur QLearning dans l'inspector (ou laisser vide pour auto-find).
+    // Trainer simple pour enchainer des épisodes et sauvegarder le meilleur modèle.
+    // Attacher à un GameObject en scène.
     public class QLearningTrainer : MonoBehaviour
     {
-        public QLearningController controller; // assignable
+        [Header("Bindings")]
+        public QLearningController controller; // optionnel: auto-find si null
+
+        [Header("Persistence & runtime")]
         public bool AutoLoad = false;
         public bool AutoSaveOnEnd = true;
         public string SaveFileName = "qtable.json";
-        public bool AutoRestartOnEnd = true; // relance la scène pour épisodes consécutifs
-        [Tooltip("Mettre >1 pour accélérer le training (Time.timeScale)")]
-        public float TrainingTimeScale = 1.0f;
-
-        [Header("Episode logging & autosave")]
-        [Tooltip("Sauvegarder automatiquement tous les N épisodes (0 = désactivé)")]
-        public int AutoSaveEveryNEpisodes = 0;
-        [Tooltip("Fenêtre (nombre d'épisodes) pour la moyenne mobile, 0 = tous les épisodes")]
-        public int MovingAverageWindow = 20;
-        [Tooltip("Si vrai, le trainer persiste entre les reloads de la scène pour accumuler les stats.")]
+        public bool AutoRestartOnEnd = true;
+        [Tooltip("Time.timeScale pendant l'entraînement")] public float TrainingTimeScale = 1.0f;
         public bool PersistAcrossEpisodes = true;
 
-        [Header("TimeScale on reload")]
-        [Tooltip("Si true, conserve TrainingTimeScale après un reload de scène. Sinon réinitialise à ResetTimeScaleOnReload.")]
-        public bool PreserveTimeScaleAcrossReloads = false;
-        [Tooltip("Valeur à appliquer à Time.timeScale si PreserveTimeScaleAcrossReloads == false (par défaut 1).")]
-        public float ResetTimeScaleOnReload = 1.0f;
+        [Header("Logging / best model")]
+        [Tooltip("Sauver tous les N épisodes (0 = désactivé)")] public int AutoSaveEveryNEpisodes = 0;
+        [Tooltip("Taille de la fenêtre pour les moyennes mobiles")] public int MovingAverageWindow = 20;
 
         [Header("Evolutionary Q-Learning")]
-        [Tooltip("Active l'entraînement évolutif (sélection + mutation) des hyperparamètres Q-Learning.")]
         public bool EvolutionaryEnabled = true;
-        [Tooltip("Taille de la population par génération.")]
-        public int PopulationSize = 6;
-        [Tooltip("Nombre d'épisodes évalués par candidat (le Q-table s'accumule sur ces épisodes).")]
-        public int EpisodesPerCandidate = 3;
-        [Tooltip("Nombre de générations à dérouler (0 = infini jusqu'à arrêt manuel).")]
-        public int MaxGenerations = 0;
-        [Tooltip("Nombre d'élites conservées inchangées d'une génération à la suivante.")]
-        public int ElitesToKeep = 1;
-        [Tooltip("Taux de mutation (écart type relatif) appliqué aux hyperparamètres")]
-        [Range(0.0f, 1.0f)] public float MutationSigma = 0.15f;
-        [Tooltip("Borne min/max pour alpha, gamma, epsilonStart, epsilonDecay, minEpsilon")]
+        [Tooltip("Taille de la population")] public int PopulationSize = 6;
+        [Tooltip("Épisodes évalués par candidat")] public int EpisodesPerCandidate = 3;
+        [Tooltip("0 = infini")] public int MaxGenerations = 0;
+        [Tooltip("Nombre d'élites conservés")] public int ElitesToKeep = 1;
+        [Tooltip("Sigma de mutation (relatif)")] [Range(0f,1f)] public float MutationSigma = 0.15f;
         public Vector2 AlphaRange = new Vector2(0.05f, 1.0f);
         public Vector2 GammaRange = new Vector2(0.5f, 0.9999f);
         public Vector2 EpsilonStartRange = new Vector2(0.01f, 1.0f);
         public Vector2 EpsilonDecayRange = new Vector2(0.9f, 0.99999f);
         public Vector2 MinEpsilonRange = new Vector2(0.0f, 0.2f);
 
-        // internal stats
-        private int _episodeCount = 0;
-        private List<int> _scoresHistory = new List<int>();
-        private List<int> _waypointsHistory = new List<int>();
-        private static QLearningTrainer _instance = null;
+        [Header("Best saving")]
+        [Tooltip("Si actif, n’enregistre qu’un seul meilleur modèle (global) dans SaveFileName.")] public bool SaveOnlyOneBest = true;
 
         private GameManager _gm;
-        private float _prevTimeScale = 1.0f;
         private bool _handledGameOver = false;
+        private int _episodeCount = 0;
+
+        // historiques (scores et victoires)
+        private readonly List<int> _scores = new List<int>();
+        private readonly List<int> _waypoints = new List<int>();
+        private readonly List<bool> _wins = new List<bool>();
+
+        // best snapshot (global)
+        private float _bestWinRate = -1f;
+        private float _bestAvgScore = float.NegativeInfinity;
+        private float _bestAvgWay = float.NegativeInfinity;
+        private string BestFileName => System.IO.Path.GetFileNameWithoutExtension(SaveFileName) + ".best.json";
+        private string BestWRFileName => System.IO.Path.GetFileNameWithoutExtension(SaveFileName) + ".best.wr.json";
+        private string BestScoreFileName => System.IO.Path.GetFileNameWithoutExtension(SaveFileName) + ".best.score.json";
+        private string BestWPFileName => System.IO.Path.GetFileNameWithoutExtension(SaveFileName) + ".best.wp.json";
+
+        private static QLearningTrainer _instance;
 
         // Evolutionary state
         private class Candidate
@@ -68,16 +66,16 @@ namespace AI
             public int generation;
             public int index;
             public float alpha, gamma, epsStart, epsDecay, minEps;
-            public int episodesRun = 0;
-            public int wins = 0;
-            public int games = 0;
-            public float cumulativeScore = 0f;
-            public float bestScore = float.MinValue;
-            public string fileName; // dedicated qtable file
-
+            public int episodesRun;
+            public int wins;
+            public int games;
+            public float cumulativeScore;
+            public float cumulativeWaypoints;
+            public float bestScore = float.NegativeInfinity;
+            public string fileName;
             public float WinRate => games > 0 ? (float)wins / games : 0f;
             public float AvgScore => games > 0 ? cumulativeScore / games : 0f;
-
+            public float AvgWaypoints => games > 0 ? cumulativeWaypoints / games : 0f;
             public Candidate Clone(int newGen, int newIdx)
             {
                 return new Candidate
@@ -93,271 +91,280 @@ namespace AI
                 };
             }
         }
-
-        private List<Candidate> _population = new List<Candidate>();
-        private int _currentGen = 0;
-        private int _currentIdx = 0;
+        private List<Candidate> _population;
+        private int _currentGen;
+        private int _currentIdx;
         private Candidate _current;
         private Candidate _bestEver;
 
-        void Awake()
+        private void Awake()
         {
-            // singleton to avoid duplicates when persisting across scene loads
             if (PersistAcrossEpisodes)
             {
                 if (_instance != null && _instance != this)
                 {
-                    Destroy(this.gameObject);
+                    Destroy(gameObject);
                     return;
                 }
                 _instance = this;
-                DontDestroyOnLoad(this.gameObject);
+                DontDestroyOnLoad(gameObject);
             }
         }
 
-        void Start()
+        private void Start()
         {
             _gm = GameManager.Instance;
             if (controller == null)
             {
-                // find any in scene
                 controller = Object.FindAnyObjectByType<QLearningController>();
             }
-
             if (controller != null)
             {
                 controller.SaveFileName = SaveFileName;
                 if (AutoLoad)
                 {
-                    controller.LoadAgent();
-                    Debug.Log("QLearningTrainer: loaded agent on start");
+                    string path = System.IO.Path.Combine(Application.persistentDataPath, SaveFileName);
+                    if (System.IO.File.Exists(path))
+                    {
+                        QLearningAgent.VerboseLoad = true; // logs détaillés sur le chargement
+                        Debug.Log($"[QL-Trainer] AutoLoad: chargement depuis {path}");
+                        controller.LoadAgent();
+                        Debug.Log($"[QL-Trainer] AutoLoad OK: {path}");
+                        // Log des métadonnées de la Q-table
+                        try
+                        {
+                            string json = System.IO.File.ReadAllText(path);
+                            QTableFile file = JsonUtility.FromJson<QTableFile>(json);
+                            if (file != null && file.metadata != null)
+                            {
+                                var md = file.metadata;
+                                int rows = (file.rows != null) ? file.rows.Count : 0;
+                                Debug.Log($"[QL-Trainer] AutoLoad META: actionCount={md.actionCount} alpha={md.alpha:F6} gamma={md.gamma:F6} epsilon={md.epsilon:F6} epsDecay={md.epsilonDecay:F6} minEps={md.minEpsilon:F6} encoding={md.encodingVersion} author={md.author} createdAt={md.createdAt} rows={rows}");
+                            }
+                            else
+                            {
+                                Debug.Log("[QL-Trainer] AutoLoad META: format sans metadata ou invalide");
+                            }
+                        }
+                        catch (System.Exception e)
+                        {
+                            Debug.LogWarning("[QL-Trainer] AutoLoad META lecture échouée: " + e.Message);
+                        }
+                    }
+                    else Debug.Log($"[QL-Trainer] AutoLoad ignoré, fichier absent: {path}");
                 }
             }
+            Time.timeScale = TrainingTimeScale > 0 ? TrainingTimeScale : 1.0f;
 
-            // If a desired TimeScale was saved before a reload (by previous trainer instance), apply it now
-            if (PlayerPrefs.HasKey("QL_DesiredTimeScale"))
-            {
-                float desired = PlayerPrefs.GetFloat("QL_DesiredTimeScale", TrainingTimeScale);
-                int flag = PlayerPrefs.GetInt("QL_PreserveTimeScaleFlag", PreserveTimeScaleAcrossReloads ? 1 : 0);
-                TrainingTimeScale = desired;
-                PreserveTimeScaleAcrossReloads = (flag == 1);
-                // consume keys so they don't persist indefinitely
-                PlayerPrefs.DeleteKey("QL_DesiredTimeScale");
-                PlayerPrefs.DeleteKey("QL_PreserveTimeScaleFlag");
-                PlayerPrefs.Save();
-                Debug.Log($"QLearningTrainer: applied desired TimeScale={TrainingTimeScale} from PlayerPrefs (preserve={PreserveTimeScaleAcrossReloads})");
-            }
-
-            _prevTimeScale = Time.timeScale;
-            if (TrainingTimeScale > 0)
-                StartCoroutine(ApplyDesiredTimeScaleCoroutine(TrainingTimeScale, PreserveTimeScaleAcrossReloads));
-
-            // subscribe to sceneLoaded so we can rebind controller after reloads
             if (PersistAcrossEpisodes)
             {
                 SceneManager.sceneLoaded += OnSceneLoaded;
             }
 
-            // Initialize evolutionary process
+            // Evolutionary init
             if (EvolutionaryEnabled)
             {
-                if (_population.Count == 0)
-                {
-                    BuildInitialPopulation();
-                }
+                if (_population == null || _population.Count == 0) BuildInitialPopulation();
                 BeginOrResumeCurrentCandidate();
             }
         }
 
-        private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        private void OnDestroy()
         {
-            // try to find a controller instance in the new scene
+            if (PersistAcrossEpisodes)
+                SceneManager.sceneLoaded -= OnSceneLoaded;
+            if (GameManager.Instance != null && GameManager.Instance.IsGameFinished())
+                Time.timeScale = 1.0f;
+        }
+
+        private void OnSceneLoaded(Scene s, LoadSceneMode m)
+        {
+            _gm = GameManager.Instance;
             if (controller == null)
             {
                 controller = Object.FindAnyObjectByType<QLearningController>();
-                if (controller != null)
-                {
-                    controller.SaveFileName = SaveFileName;
-                    Debug.Log("QLearningTrainer: re-bound controller after scene load");
-                }
+                if (controller != null) controller.SaveFileName = SaveFileName;
             }
-            // refresh GameManager reference
-            _gm = GameManager.Instance;
-
-            // Apply time scale after a short delay to avoid execution-order race conditions
-            float desired = PreserveTimeScaleAcrossReloads ? TrainingTimeScale : ResetTimeScaleOnReload;
-            StartCoroutine(ApplyDesiredTimeScaleCoroutine(desired, PreserveTimeScaleAcrossReloads));
-
-            // reset handled flag when a new scene is loaded
             _handledGameOver = false;
+            Time.timeScale = TrainingTimeScale > 0 ? TrainingTimeScale : 1.0f;
 
-            // Re-apply current evolutionary candidate after reload
             if (EvolutionaryEnabled)
             {
                 BeginOrResumeCurrentCandidate();
             }
         }
 
-        private System.Collections.IEnumerator ApplyDesiredTimeScaleCoroutine(float desired, bool preserve)
-        {
-            // wait one frame to ensure other Awake/Start code (GameManager) finished
-            yield return null;
-            Time.timeScale = desired > 0 ? desired : 1.0f;
-            if (preserve)
-                Debug.Log($"QLearningTrainer: applied desired TrainingTimeScale = {desired} after delay");
-            else
-                Debug.Log($"QLearningTrainer: reset Time.timeScale to {desired} after delay");
-        }
-
-        void OnDestroy()
-        {
-            if (PersistAcrossEpisodes)
-            {
-                SceneManager.sceneLoaded -= OnSceneLoaded;
-                if (_instance == this) _instance = null;
-            }
-            Time.timeScale = _prevTimeScale;
-        }
-
-        void Update()
+        private void Update()
         {
             if (controller == null) return;
 
-            // shortcuts:
-            // K -> save agent table
-            // L -> load agent table
-            // P -> toggle training mode
-            // R -> restart scene
-            if (Input.GetKeyDown(KeyCode.K))
-            {
-                controller.SaveAgent();
-                Debug.Log("QLearningTrainer: saved agent (K)");
-            }
-            if (Input.GetKeyDown(KeyCode.L))
-            {
-                controller.LoadAgent();
-                Debug.Log("QLearningTrainer: loaded agent (L)");
-            }
-            if (Input.GetKeyDown(KeyCode.P))
-            {
-                controller.TrainingMode = !controller.TrainingMode;
-                Debug.Log("QLearningTrainer: TrainingMode = " + controller.TrainingMode);
-            }
-            if (Input.GetKeyDown(KeyCode.R))
-            {
-                SceneManager.LoadScene(SceneManager.GetActiveScene().name);
-            }
+            // hotkeys
+            if (Input.GetKeyDown(KeyCode.K)) controller.SaveAgent();
+            if (Input.GetKeyDown(KeyCode.L)) { QLearningAgent.VerboseLoad = true; Debug.Log("[QL-Trainer] Hotkey L: LoadAgent()"); controller.LoadAgent(); }
+            if (Input.GetKeyDown(KeyCode.P)) controller.TrainingMode = !controller.TrainingMode;
+            if (Input.GetKeyDown(KeyCode.R)) SceneManager.LoadScene(SceneManager.GetActiveScene().name);
 
-            if (_gm != null)
+            if (_gm == null) return;
+            if (_gm.IsGameFinished())
             {
-                bool gameFinished = _gm.IsGameFinished();
-                if (gameFinished)
+                if (_handledGameOver) return;
+                _handledGameOver = true;
+
+                // log et récompense terminale
+                var ship = _gm.GetSpaceShipForController(controller);
+                int owner = ship != null ? ship.Owner : 0;
+                int opp = owner == 0 ? 1 : 0;
+                int score = _gm.GetScoreForPlayer(owner);
+                int oppScore = _gm.GetScoreForPlayer(opp);
+                int wps = _gm.GetWayPointScoreForPlayer(owner);
+                bool win = score > oppScore;
+
+                _episodeCount++;
+                _scores.Add(score);
+                _waypoints.Add(wps);
+                _wins.Add(win);
+
+                if (controller.TrainingMode)
                 {
-                    // Only handle once per game-over transition
-                    if (_handledGameOver) return;
+                    controller.ApplyTerminalResult(win);
+                }
 
-                    // Only treat game-over as an episode end when training is enabled.
-                    if (controller == null || !controller.TrainingMode)
+                // evolutionary accounting
+                if (EvolutionaryEnabled && _current != null)
+                {
+                    _current.games++;
+                    if (win) _current.wins++;
+                    _current.cumulativeScore += score;
+                    _current.cumulativeWaypoints += wps;
+                    if (score > _current.bestScore) _current.bestScore = score;
+                    _current.episodesRun++;
+                }
+
+                // moving averages
+                int avail = (EvolutionaryEnabled && _current != null) ? _current.episodesRun : _scores.Count;
+                int n = Mathf.Min(MovingAverageWindow > 0 ? MovingAverageWindow : avail, avail);
+                float avgScore = 0f; float avgWay = 0f; int winCount = 0;
+                int start = Mathf.Max(0, _scores.Count - n);
+                for (int i = start; i < _scores.Count; i++)
+                {
+                    avgScore += _scores[i];
+                    avgWay += _waypoints[i];
+                }
+                int wstart = Mathf.Max(0, _wins.Count - n);
+                for (int i = wstart; i < _wins.Count; i++)
+                {
+                    if (_wins[i]) winCount++;
+                }
+                if (n > 0) { avgScore /= n; avgWay /= n; }
+                float winRate = n > 0 ? (float)winCount / n : 0f;
+                string genInfo = EvolutionaryEnabled && _current != null ? $"G={_currentGen} C={_current.index} EpCand={_current.episodesRun}/{Mathf.Max(1, EpisodesPerCandidate)}" : "G=- C=- EpCand=-/-";
+                Debug.Log($"Episode {_episodeCount}: {genInfo}, score={score}, waypoints={wps}, win={(win ? 1 : 0)}, MA(n={n}) score={avgScore:F2} way={avgWay:F2} winRate={winRate:P1}");
+
+                // autosave courant: uniquement si AutoSaveOnEnd
+                if (AutoSaveOnEnd && AutoSaveEveryNEpisodes > 0 && (_episodeCount % AutoSaveEveryNEpisodes) == 0)
+                {
+                    controller.SaveAgent();
+                }
+                if (AutoSaveOnEnd)
+                {
+                    controller.SaveAgent();
+                }
+
+                // best snapshots (best-only si SaveOnlyOneBest)
+                if (winRate > _bestWinRate + 1e-4f || (Mathf.Approximately(winRate, _bestWinRate) && avgScore > _bestAvgScore))
+                {
+                    _bestWinRate = winRate;
+                    if (avgScore > _bestAvgScore) _bestAvgScore = avgScore;
+                    // si best-only -> écrire dans SaveFileName, sinon BestFileName
+                    string target = SaveOnlyOneBest ? SaveFileName : BestFileName;
+                    SaveModelWithMetrics(target, winRate, avgScore, avgWay, _episodeCount);
+                }
+                if (!SaveOnlyOneBest)
+                {
+                    // best par winrate
+                    if (winRate > (_bestWinRate + 1e-4f) || (_bestWinRate < 0f && winRate > 0f))
                     {
-                        // restore timeScale in case the trainer previously changed it
-                        Time.timeScale = _prevTimeScale;
-                        _handledGameOver = true;
-                        return;
+                        SaveModelWithMetrics(BestWRFileName, winRate, avgScore, avgWay, _episodeCount);
                     }
-
-                    // mark handled to avoid repeated increments
-                    _handledGameOver = true;
-
-                    // log episode stats for the player controlled by the trainer's controller
-                    int owner = -1;
-                    var ship = _gm.GetSpaceShipForController(controller);
-                    if (ship != null) owner = ship.Owner;
-                    else owner = 0; // fallback
-
-                    int score = _gm.GetScoreForPlayer(owner);
-                    int waypoints = _gm.GetWayPointScoreForPlayer(owner);
-                    _episodeCount++;
-                    _scoresHistory.Add(score);
-                    _waypointsHistory.Add(waypoints);
-
-                    // compute moving averages
-                    int countToUse = MovingAverageWindow > 0 ? Mathf.Min(MovingAverageWindow, _scoresHistory.Count) : _scoresHistory.Count;
-                    float avgScore = 0f; float avgWay = 0f;
-                    for (int i = _scoresHistory.Count - countToUse; i < _scoresHistory.Count; i++)
+                    // best par score moyen
+                    if (avgScore > _bestAvgScore + 1e-4f)
                     {
-                        if (i >= 0)
-                        {
-                            avgScore += _scoresHistory[i];
-                            avgWay += _waypointsHistory[i];
-                        }
+                        _bestAvgScore = avgScore;
+                        SaveModelWithMetrics(BestScoreFileName, winRate, avgScore, avgWay, _episodeCount);
                     }
-                    if (countToUse > 0) { avgScore /= countToUse; avgWay /= countToUse; }
-
-                    Debug.Log($"Episode {_episodeCount}: score={score}, waypoints={waypoints}, avgScore({countToUse})={avgScore:F2}, avgWaypoints({countToUse})={avgWay:F2}");
-
-                    // evolutionary episode accounting
-                    if (EvolutionaryEnabled && _current != null)
+                    // best par waypoints moyen
+                    if (avgWay > _bestAvgWay + 1e-4f)
                     {
-                        int opponentId = owner == 0 ? 1 : 0;
-                        int oppScore = _gm.GetScoreForPlayer(opponentId);
-                        bool win = score > oppScore;
-                        _current.games++;
-                        if (win) _current.wins++;
-                        _current.cumulativeScore += score;
-                        if (score > _current.bestScore) _current.bestScore = score;
-
-                        Debug.Log($"[EVOL] Gen {_current.generation} Cand {_current.index} Episode {_current.episodesRun + 1}/{EpisodesPerCandidate} -> Score={score} vs Opp={oppScore} => {(win ? "WIN" : "LOSS")} | WR={_current.WinRate:P1} Avg={_current.AvgScore:F2}");
-                        _current.episodesRun++;
+                        _bestAvgWay = avgWay;
+                        SaveModelWithMetrics(BestWPFileName, winRate, avgScore, avgWay, _episodeCount);
                     }
+                }
 
-                    // autosave every N episodes
-                    if (AutoSaveEveryNEpisodes > 0 && (_episodeCount % AutoSaveEveryNEpisodes) == 0)
-                    {
-                        controller.SaveAgent();
-                        Debug.Log($"QLearningTrainer: Auto-saved agent at episode {_episodeCount}");
-                    }
+                // Evolution step
+                if (EvolutionaryEnabled)
+                {
+                    HandleEvolutionProgression();
+                }
 
-                    if (AutoSaveOnEnd)
-                    {
-                        controller.SaveAgent();
-                        Debug.Log("QLearningTrainer: saved agent at end of episode");
-                    }
-
-                    // Evolutionary flow control
-                    if (EvolutionaryEnabled)
-                    {
-                        HandleEvolutionProgression();
-                    }
-
-                    if (AutoRestartOnEnd)
-                    {
-                        // persist desired Time.timeScale across reload via PlayerPrefs so new scene/trainer can reapply it
-                        PlayerPrefs.SetFloat("QL_DesiredTimeScale", TrainingTimeScale);
-                        PlayerPrefs.SetInt("QL_PreserveTimeScaleFlag", PreserveTimeScaleAcrossReloads ? 1 : 0);
-                        PlayerPrefs.Save();
-
-                        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
-                    }
-                    else
-                    {
-                        // restore timeScale
-                        Time.timeScale = _prevTimeScale;
-                    }
+                // restart si demandé
+                if (AutoRestartOnEnd && controller.TrainingMode)
+                {
+                    SceneManager.LoadScene(SceneManager.GetActiveScene().name);
                 }
                 else
                 {
-                    // game running -> reset handled flag so next game-over will be processed
-                    _handledGameOver = false;
+                    Time.timeScale = 1.0f;
                 }
             }
+            else
+            {
+                _handledGameOver = false;
+            }
+        }
+
+        private void SaveModelWithMetrics(string modelFile, float winRate, float avgScore, float avgWay, int episodes)
+        {
+            if (controller == null) return;
+            string prev = controller.SaveFileName;
+            controller.SaveFileName = modelFile;
+            controller.SaveAgent();
+            controller.SaveFileName = prev;
+            // write sidecar metrics json
+            var metrics = new BestMetrics
+            {
+                movingWinRate = winRate,
+                movingAvgScore = avgScore,
+                movingAvgWaypoints = avgWay,
+                episodes = episodes,
+                timestamp = System.DateTime.UtcNow.ToString("o"),
+                generation = (EvolutionaryEnabled && _current != null) ? _current.generation : -1,
+                candidate = (EvolutionaryEnabled && _current != null) ? _current.index : -1
+            };
+            string json = JsonUtility.ToJson(metrics, true);
+            string path = System.IO.Path.Combine(UnityEngine.Application.persistentDataPath, modelFile + ".metrics.json");
+            System.IO.File.WriteAllText(path, json);
+            Debug.Log($"[BEST] Saved snapshot {modelFile} with metrics -> WR={winRate:P1} Score={avgScore:F2} WP={avgWay:F2}");
+        }
+
+        [System.Serializable]
+        private class BestMetrics
+        {
+            public float movingWinRate;
+            public float movingAvgScore;
+            public float movingAvgWaypoints;
+            public int episodes;
+            public string timestamp;
+            public int generation;
+            public int candidate;
         }
 
         // ---- Evolutionary helpers ----
         private void BuildInitialPopulation()
         {
-            _population.Clear();
-            _currentGen = 0;
-            for (int i = 0; i < Mathf.Max(1, PopulationSize); i++)
+            _population = new List<Candidate>();
+            _currentGen = 0; _currentIdx = 0; _bestEver = null;
+            int sz = Mathf.Max(1, PopulationSize);
+            for (int i = 0; i < sz; i++)
             {
                 Candidate c = new Candidate
                 {
@@ -372,58 +379,27 @@ namespace AI
                 };
                 _population.Add(c);
             }
-            _currentIdx = 0;
             _current = _population[_currentIdx];
-            _bestEver = null;
-            Debug.Log($"[EVOL] Initial population created (Gen {_currentGen}, Size={_population.Count})");
+            Debug.Log($"[EVOL] Initial population Gen={_currentGen} Size={_population.Count}");
         }
 
         private void BeginOrResumeCurrentCandidate()
         {
             if (!EvolutionaryEnabled) return;
-            if (_population == null || _population.Count == 0)
-            {
-                BuildInitialPopulation();
-            }
-            if (_current == null)
-            {
-                _currentIdx = Mathf.Clamp(_currentIdx, 0, _population.Count - 1);
-                _current = _population[_currentIdx];
-            }
+            if (_population == null || _population.Count == 0) BuildInitialPopulation();
+            _currentIdx = Mathf.Clamp(_currentIdx, 0, _population.Count - 1);
+            _current = _population[_currentIdx];
 
-            // apply hyperparams and set candidate-specific save file
-            if (controller != null && _current != null)
+            if (controller == null) return;
+            controller.SaveFileName = _current.fileName;
+            controller.TrainingMode = true;
+            bool reset = _current.episodesRun == 0;
+            controller.ApplyHyperParamsAndReset(_current.alpha, _current.gamma, _current.epsStart, _current.epsDecay, _current.minEps, reset);
+            if (!reset)
             {
-                controller.SaveFileName = _current.fileName;
-                controller.TrainingMode = true;
-                bool resetTable = _current.episodesRun == 0; // fresh candidate => reset
-                controller.ApplyHyperParamsAndReset(_current.alpha, _current.gamma, _current.epsStart, _current.epsDecay, _current.minEps, resetTable);
-                if (!resetTable)
-                {
-                    // Only attempt to load an existing q-table file; if absent, skip silently to avoid warnings
-                    try
-                    {
-                        string path = System.IO.Path.Combine(Application.persistentDataPath, _current.fileName);
-                        if (System.IO.File.Exists(path))
-                        {
-                            controller.LoadAgent(); // continue from previous episodes' Q-table
-                        }
-                        else
-                        {
-                            // no file to load — skip without warning
-                            if (AutoSaveOnEnd)
-                            {
-                                // if autosave is enabled but file missing, still try to load and let controller report any issue
-                                controller.LoadAgent();
-                            }
-                        }
-                    }
-                    catch (System.Exception e)
-                    {
-                        Debug.LogWarning($"[EVOL] Failed to load candidate table {_current.fileName}: {e.Message}");
-                    }
-                }
-                Debug.Log($"[EVOL] Starting Gen {_current.generation} Cand {_current.index} (epsiode {_current.episodesRun + 1}/{EpisodesPerCandidate}) α={_current.alpha:F3} γ={_current.gamma:F4} ε0={_current.epsStart:F2} decay={_current.epsDecay:F5} εmin={_current.minEps:F2} -> file={_current.fileName}");
+                string path = System.IO.Path.Combine(Application.persistentDataPath, _current.fileName);
+                if (System.IO.File.Exists(path)) controller.LoadAgent();
+                else Debug.Log($"[EVOL] Pas de Q-table existante pour ce candidat (fresh): {path}");
             }
         }
 
@@ -431,65 +407,43 @@ namespace AI
         {
             if (_current == null) return;
 
-            // Ensure current candidate q-table is saved when needed
-            // (e.g. when it becomes best or when its evaluation finishes). Respect AutoSaveOnEnd
-            void SaveCandidateTable(string candidateFile, bool forceSave = false)
-            {
-                try
-                {
-                    if (controller == null) return;
-                    // Respect the AutoSaveOnEnd setting unless explicitly forced
-                    if (!AutoSaveOnEnd && !forceSave) return;
-                    string prev = controller.SaveFileName;
-                    controller.SaveFileName = candidateFile;
-                    controller.SaveAgent();
-                    controller.SaveFileName = prev;
-                }
-                catch (System.Exception e)
-                {
-                    Debug.LogWarning($"[EVOL] Failed to save candidate table {candidateFile}: {e.Message}");
-                }
-            }
-
-            // update global best if improved by winrate then avg score
+            // best-ever: on sauve toujours le meilleur candidat (best-only)
             if (_bestEver == null || IsBetter(_current, _bestEver))
             {
                 _bestEver = _current;
-                // save current candidate table to ensure file exists (force regardless of AutoSaveOnEnd)
-                SaveCandidateTable(_current.fileName, true);
-                // Copy current candidate's table to public SaveFileName for convenience
+                string prev = controller.SaveFileName;
+                controller.SaveFileName = _current.fileName;
+                controller.SaveAgent();
+                controller.SaveFileName = prev;
                 TryCopyCandidateToPublic(_current.fileName, SaveFileName);
-                Debug.Log($"[EVOL] New BEST so far -> Gen {_current.generation} Cand {_current.index} WR={_current.WinRate:P1} Avg={_current.AvgScore:F2} (α={_current.alpha:F3}, γ={_current.gamma:F4}, ε0={_current.epsStart:F2} decay={_current.epsDecay:F5} εmin={_current.minEps:F2})");
+                Debug.Log($"[EVOL] New BEST -> Gen {_current.generation} Cand {_current.index} WR={_current.WinRate:P1} Avg={_current.AvgScore:F2}");
             }
 
-            // if candidate finished its episodes -> move to next
             if (_current.episodesRun >= Mathf.Max(1, EpisodesPerCandidate))
             {
-                // ensure candidate table is saved before we advance
-                // only save at end of candidate if AutoSaveOnEnd is enabled or if this candidate is the current best
-                bool isBest = (_bestEver == _current);
-                if (AutoSaveOnEnd || isBest)
+                // fin de candidat: ne sauvegarder le fichier candidat que si AutoSaveOnEnd
+                if (AutoSaveOnEnd)
                 {
-                    SaveCandidateTable(_current.fileName, /*forceSave*/ isBest);
+                    string prev = controller.SaveFileName;
+                    controller.SaveFileName = _current.fileName;
+                    controller.SaveAgent();
+                    controller.SaveFileName = prev;
                 }
 
-                Debug.Log($"[EVOL] Candidate over -> Gen {_current.generation} Cand {_current.index} Summary: WR={_current.WinRate:P1} Avg={_current.AvgScore:F2} BestScore={_current.bestScore:F1}");
                 _currentIdx++;
                 if (_currentIdx >= _population.Count)
                 {
-                    // Generation end -> spawn next generation
+                    // fin de génération
                     if (MaxGenerations > 0 && _currentGen + 1 >= MaxGenerations)
                     {
-                        Debug.Log("[EVOL] Reached MaxGenerations. Stopping evolution loop.");
+                        Debug.Log("[EVOL] MaxGenerations atteint. Arrêt de l'évolution.");
                         EvolutionaryEnabled = false;
                         return;
                     }
-
-                    List<Candidate> next = BreedNextGeneration(_population, _currentGen + 1);
-                    _population = next;
+                    _population = BreedNextGeneration(_population, _currentGen + 1);
                     _currentGen++;
                     _currentIdx = 0;
-                    Debug.Log($"[EVOL] New Generation {_currentGen} created. Size={_population.Count}");
+                    Debug.Log($"[EVOL] New Generation = {_currentGen}");
                 }
                 _current = _population[_currentIdx];
             }
@@ -497,26 +451,26 @@ namespace AI
 
         private List<Candidate> BreedNextGeneration(List<Candidate> prev, int newGen)
         {
-            // rank by winrate then avg score
+            // tri par winrate puis avg score puis avg waypoints
             prev.Sort((a, b) =>
             {
-                int cmp = b.WinRate.CompareTo(a.WinRate);
-                if (cmp != 0) return cmp;
-                return b.AvgScore.CompareTo(a.AvgScore);
+                int c = b.WinRate.CompareTo(a.WinRate);
+                if (c != 0) return c;
+                c = b.AvgScore.CompareTo(a.AvgScore);
+                if (c != 0) return c;
+                return b.AvgWaypoints.CompareTo(a.AvgWaypoints);
             });
 
             List<Candidate> next = new List<Candidate>();
-            int elites = Mathf.Clamp(ElitesToKeep, 0, Mathf.Min(prev.Count, PopulationSize));
+            int elites = Mathf.Clamp(ElitesToKeep, 0, Mathf.Min(prev.Count, Mathf.Max(1, PopulationSize)));
             for (int i = 0; i < elites; i++)
             {
-                Candidate elite = prev[i].Clone(newGen, next.Count);
-                // reset stats for new generation; keep table file name new
-                elite.episodesRun = 0; elite.wins = 0; elite.games = 0; elite.cumulativeScore = 0; elite.bestScore = float.MinValue;
-                next.Add(elite);
-                Debug.Log($"[EVOL] Elite carried -> from Gen {prev[i].generation} Cand {prev[i].index} WR={prev[i].WinRate:P1} Avg={prev[i].AvgScore:F2}");
+                Candidate e = prev[i].Clone(newGen, next.Count);
+                // reset stats pour la nouvelle génération
+                e.episodesRun = 0; e.wins = 0; e.games = 0; e.cumulativeScore = 0; e.bestScore = float.NegativeInfinity;
+                next.Add(e);
             }
 
-            // parent pool (top half)
             int parentPool = Mathf.Max(1, prev.Count / 2);
             System.Random rnd = new System.Random();
             while (next.Count < Mathf.Max(1, PopulationSize))
@@ -524,26 +478,22 @@ namespace AI
                 Candidate p = prev[rnd.Next(parentPool)];
                 Candidate child = p.Clone(newGen, next.Count);
                 Mutate(child);
-                child.episodesRun = 0; child.wins = 0; child.games = 0; child.cumulativeScore = 0; child.bestScore = float.MinValue;
+                child.episodesRun = 0; child.wins = 0; child.games = 0; child.cumulativeScore = 0; child.bestScore = float.NegativeInfinity;
                 next.Add(child);
             }
-
             return next;
         }
 
         private void Mutate(Candidate c)
         {
-            // gaussian-like noise via Box-Muller on [-sigma, +sigma] approx using UnityEngine.Random
             float Jitter(float value, Vector2 range, float sigma)
             {
-                // sample from normal(0,1) approx
                 float u1 = Mathf.Clamp01(Random.value);
                 float u2 = Mathf.Clamp01(Random.value);
                 float z = Mathf.Sqrt(-2.0f * Mathf.Log(Mathf.Max(1e-6f, u1))) * Mathf.Cos(2.0f * Mathf.PI * u2);
-                float nv = value * (1.0f + z * sigma);
-                return Mathf.Clamp(nv, range.x, range.y);
+                float v = value * (1.0f + z * sigma);
+                return Mathf.Clamp(v, range.x, range.y);
             }
-
             c.alpha = Jitter(c.alpha, AlphaRange, MutationSigma);
             c.gamma = Jitter(c.gamma, GammaRange, MutationSigma);
             c.epsStart = Jitter(c.epsStart, EpsilonStartRange, MutationSigma);
@@ -553,11 +503,9 @@ namespace AI
 
         private bool IsBetter(Candidate a, Candidate b)
         {
-            if (a == null) return false;
             if (b == null) return true;
-            if (Mathf.Approximately(a.WinRate, b.WinRate))
-                return a.AvgScore > b.AvgScore;
-            return a.WinRate > b.WinRate;
+            if (!Mathf.Approximately(a.WinRate, b.WinRate)) return a.WinRate > b.WinRate;
+            return a.AvgScore > b.AvgScore;
         }
 
         private void TryCopyCandidateToPublic(string candidateFile, string publicFile)
@@ -571,16 +519,12 @@ namespace AI
                     System.IO.File.Copy(src, dst, true);
                 }
             }
-            catch (System.SystemException e)
-            {
-                Debug.LogWarning($"[EVOL] Failed to copy best candidate file: {e.Message}");
-            }
+            catch { }
         }
 
         private float RandomInRange(Vector2 r)
         {
             return Random.Range(r.x, r.y);
         }
-
     }
 }

@@ -1,9 +1,10 @@
 ﻿using UnityEngine;
 using DoNotModify;
+using System;
+using System.Text;
 
 namespace AI
 {
-    // Contrôleur modulaire utilisant QLearningAgent
     public class QLearningController : BaseSpaceShipController
     {
         [Header("Agent parameters")]
@@ -14,20 +15,12 @@ namespace AI
         [SerializeField] private float _minEpsilon = 0.01f;
 
         [Header("Rewards & penalties")]
-        [Tooltip("Reward added when a waypoint is captured (per waypoint).")]
         [SerializeField] private float rewardPerWaypoint = 1.0f;
-        [Tooltip("Reward added when score increases (per score point).")]
         [SerializeField] private float rewardPerScore = 0.5f;
-        [Tooltip("Small living penalty applied every step to encourage faster behaviour (can be negative).")]
         [SerializeField] private float livingPenalty = -0.01f;
-        [Tooltip("Exploration bonus given when a shot was fired in the previous step.")]
-        [SerializeField] private float rewardForShot = 0.2f;
-        [Tooltip("Exploration bonus given when a mine was dropped in the previous step.")]
-        [SerializeField] private float rewardForDropMine = 0.25f;
-        [Tooltip("Exploration bonus given when a shockwave was fired in the previous step.")]
-        [SerializeField] private float rewardForShockwave = 0.35f;
-        [Tooltip("Penalty applied when the ship receives a hit (per hit). Use negative value for punishment).")]
-        [SerializeField] private float penaltyOnHit = -0.5f;
+        [SerializeField] private float rewardForHit = 1.0f; // reward when opponent is hit (HitScore increases)
+        [SerializeField] private float penaltyOnHit = -0.5f; // our hit count increases
+        [SerializeField] private float rewardForShockwave = 0.3f; // nouveau: encourager l’usage de la shockwave
 
         [Header("Discretization / behaviour")]
         [SerializeField] private float _nearFactor = 1.5f;
@@ -36,87 +29,164 @@ namespace AI
         [SerializeField] private float _avoidConeAngle = 60.0f;
 
         [Header("Action mapping")]
-        [SerializeField] private float[] thrustLevels = new float[3] { 0f, 0.5f, 1f };
-        [SerializeField] private float[] steerAngles = new float[3] { -30f, 0f, 30f };
+        [SerializeField] private float[] thrustLevels = new float[] { 0f, 0.5f, 1f };
+        [SerializeField] private float[] steerAngles = new float[] { -30f, 0f, 30f };
 
         [Header("Runtime")]
         public bool TrainingMode = true;
         public string SaveFileName = "qtable.json";
-        // centralized autoload is handled by QLearningTrainer
 
         [Header("Energy management")]
         [SerializeField] private bool useEnergyPenalty = true;
         [SerializeField, Range(0f, 1f)] private float energyHighThreshold = 0.8f;
         [SerializeField, Range(0f, 1f)] private float energyLowThreshold = 0.15f;
-        [Tooltip("Penalty applied proportionally when energy is above the high threshold (negative to punish hoarding).")]
         [SerializeField] private float penaltyHighEnergy = -0.02f;
-        [Tooltip("Penalty applied proportionally when energy is below the low threshold (negative to punish starving).")]
         [SerializeField] private float penaltyLowEnergy = -0.05f;
 
-        // Exposed properties pour modularité
-        public float Alpha { get => _alpha; set { _alpha = value; if (agent != null) agent.Alpha = value; } }
-        public float Gamma { get => _gamma; set { _gamma = value; if (agent != null) agent.Gamma = value; } }
-        public float Epsilon { get => _epsilon; set { _epsilon = value; if (agent != null) agent.Epsilon = value; } }
-        public float EpsilonDecay { get => _epsilonDecay; set { _epsilonDecay = value; if (agent != null) agent.EpsilonDecay = value; } }
-        public float MinEpsilon { get => _minEpsilon; set { _minEpsilon = value; if (agent != null) agent.MinEpsilon = value; } }
+        [Header("Sensors / advanced inputs")]
+        [SerializeField] private int fanRays = 3;
+        [SerializeField] private float fanAngle = 60f;
+        [SerializeField] private float fanRange = 8f;
+        [SerializeField] private bool useCircleCast = true;
+        [SerializeField] private float circleRadius = 0.3f;
 
-        private QLearningAgent agent;
+        [Header("Aiming Helpers")]
+        [SerializeField] private float steeringOvershoot = 1.2f;
+        [SerializeField] private float shootHitTimeTolerance = 0.25f;
+
+        [Header("Terminal rewards")]
+        [SerializeField] private float terminalWinReward = 1.0f;
+        [SerializeField] private float terminalLossPenalty = -1.5f;
 
         [Header("Debug")]
-        [SerializeField] private bool DebugActions = false;
-        private int _weaponActionCount = 0;
-        private int _totalActionCount = 0;
-        private float _logInterval = 5.0f;
-        private float _logTimer = 0f;
+        [SerializeField] private bool debugActions = false;
+        [Header("Debug avancé")]
+        [SerializeField] private bool debugVerbose = false;
+        [SerializeField] private float debugVerboseInterval = 1.0f; // secondes
+        private float _debugTimer;
 
-        // previous step for learning
-        private string prevState = null;
-        private int prevAction = -1;
-        private int prevWaypoints = 0;
-        private int prevScore = 0;
-        private int prevHitCount = 0;
+        private QLearningAgent _agent;
 
-        // helper
+        // prev trackers
+        private string _prevState;
+        private int _prevAction = -1;
+        private int _prevWaypointScore;
+        private int _prevScore;
+        private int _prevHitScore;
+        private int _prevHitCount;
+
         private SpaceShipView _shipView;
         private GameData _data;
+
+        private struct FanHit { public bool hit; public float dist; public float normalVelAngle; }
+
+        private struct RewardDetails
+        {
+            public float total;
+            public int wpDiff;
+            public int scoreDiff;
+            public int hitScDiff;
+            public int gotHitDiff;
+            public float energyHighPenalty;
+            public float energyLowPenalty;
+            public float living;
+            public float shockwave; // récompense shockwave
+        }
+        private RewardDetails _lastReward;
+
+        // Exposed properties
+        public float Alpha { get => _alpha; set { _alpha = value; if (_agent != null) _agent.Alpha = value; } }
+        public float Gamma { get => _gamma; set { _gamma = value; if (_agent != null) _agent.Gamma = value; } }
+        public float Epsilon { get => _epsilon; set { _epsilon = value; if (_agent != null) _agent.Epsilon = value; } }
+        public float EpsilonDecay { get => _epsilonDecay; set { _epsilonDecay = value; if (_agent != null) _agent.EpsilonDecay = value; } }
+        public float MinEpsilon { get => _minEpsilon; set { _minEpsilon = value; if (_agent != null) _agent.MinEpsilon = value; } }
 
         public override void Initialize(SpaceShipView spaceship, GameData data)
         {
             _shipView = spaceship;
             _data = data;
 
-            agent = new QLearningAgent();
-            // expand action space: 3 thrust levels × 3 steer options × 4 weapon choices (none, shoot, dropMine, fireShockwave)
-            int actionCount = 3 * 3 * 4; // 36 actions
-            agent.Initialize(actionCount, _alpha, _gamma, _epsilon);
-            agent.EpsilonDecay = _epsilonDecay;
-            agent.MinEpsilon = _minEpsilon;
+            _agent = new QLearningAgent();
+            int actionCount = 3 * 3 * 4; // thrust x steer x weapon
+            _agent.Initialize(actionCount, _alpha, _gamma, _epsilon);
+            _agent.EpsilonDecay = _epsilonDecay;
+            _agent.MinEpsilon = _minEpsilon;
 
-            prevState = null;
-            prevAction = -1;
-            prevWaypoints = spaceship.WaypointScore;
-            prevScore = spaceship.Score;
-            prevHitCount = spaceship.HitCount;
+            _prevState = null;
+            _prevAction = -1;
+            _prevWaypointScore = spaceship.WaypointScore;
+            _prevScore = spaceship.Score;
+            _prevHitScore = spaceship.HitScore;
+            _prevHitCount = spaceship.HitCount;
         }
 
-        // simple threat detection (adaptée de ExampleController)
-        private AsteroidView DetectThreat(SpaceShipView ship, GameData data)
+        // --- Sensors ---
+        private FanHit[] SampleFan(SpaceShipView ship)
         {
-            if (data == null || data.Asteroids == null) return null;
-            AsteroidView nearest = null; float best = float.MaxValue;
-            foreach (AsteroidView a in data.Asteroids)
+            FanHit[] res = new FanHit[Mathf.Max(1, fanRays)];
+            float half = fanAngle * 0.5f;
+            for (int i = 0; i < res.Length; i++)
             {
-                if (a == null) continue;
-                Vector2 to = a.Position - ship.Position; float d = to.magnitude;
-                if (d > _avoidAheadDistance) continue;
-                float ang = Mathf.Abs(Vector2.SignedAngle(ship.LookAt, to));
-                if (ang > _avoidConeAngle * 0.5f) continue;
-                if (d < best) { best = d; nearest = a; }
+                float t = res.Length == 1 ? 0f : (float)i / (res.Length - 1);
+                float ang = Mathf.Lerp(-half, half, t);
+                Vector2 dir = Quaternion.Euler(0, 0, ship.Orientation + ang) * Vector2.right;
+                RaycastHit2D hit = useCircleCast
+                    ? Physics2D.CircleCast(ship.Position, circleRadius, dir, fanRange)
+                    : Physics2D.Raycast(ship.Position, dir, fanRange);
+                FanHit fh = new FanHit();
+                if (hit.collider != null)
+                {
+                    fh.hit = true;
+                    fh.dist = hit.distance;
+                    Vector2 normal = hit.normal;
+                    Vector2 invNormal = -normal;
+                    Vector2 vel = ship.Velocity;
+                    fh.normalVelAngle = (vel.sqrMagnitude < 1e-6f) ? 180f : Mathf.Abs(Vector2.SignedAngle(invNormal, vel));
+                }
+                else
+                {
+                    fh.hit = false; fh.dist = fanRange; fh.normalVelAngle = 180f;
+                }
+                res[i] = fh;
             }
-            return nearest;
+            return res;
         }
 
-        // find nearest waypoint not owned
+        private (float dist, bool willHit) NearestBulletThreat(SpaceShipView ship, GameData data)
+        {
+            if (data == null || data.Bullets == null || data.Bullets.Count == 0) return (float.MaxValue, false);
+            float bestD = float.MaxValue; bool will = false;
+            foreach (var b in data.Bullets)
+            {
+                if (b == null) continue;
+                Vector2 to = ship.Position - b.Position;
+                float d = to.magnitude;
+                if (d < bestD) bestD = d;
+                Vector2 bv = b.Velocity; if (bv.sqrMagnitude < 1e-6f) continue;
+                // Lateral distance from bullet line
+                Vector2 perpDir = new Vector2(-bv.y, bv.x).normalized;
+                float perp = Mathf.Abs(Vector2.Dot(perpDir, to));
+                float along = Vector2.Dot(bv.normalized, to);
+                // incoming if along>0 and lateral miss smaller than radius
+                if (perp <= ship.Radius * 1.2f && along > 0 && along <= bv.magnitude * 2.0f) will = true;
+            }
+            return (bestD, will);
+        }
+
+        private (float dist, bool willTrigger) NearestMineThreat(SpaceShipView ship, GameData data)
+        {
+            if (data == null || data.Mines == null || data.Mines.Count == 0) return (float.MaxValue, false);
+            float bestD = float.MaxValue; bool will = false;
+            foreach (var m in data.Mines)
+            {
+                if (m == null) continue;
+                float d = (m.Position - ship.Position).magnitude;
+                if (d < bestD) bestD = d;
+                if (d <= ship.Radius * 2.0f && m.IsActive) will = true;
+            }
+            return (bestD, will);
+        }
+
         private WayPointView FindNextTarget(SpaceShipView ship, GameData data)
         {
             if (data == null || data.WayPoints == null || data.WayPoints.Count == 0) return null;
@@ -130,262 +200,223 @@ namespace AI
             return best;
         }
 
-        // discretize the state to a string key: distBucket_angleBucket_threat
+        private bool EnemyInLineOfSight(SpaceShipView ship, GameData data)
+        {
+            if (data == null || data.SpaceShips == null) return false;
+            foreach (var sv in data.SpaceShips)
+            {
+                if (sv == null || sv.Owner == ship.Owner) continue;
+                Vector2 to = sv.Position - ship.Position;
+                float ang = Mathf.Abs(Vector2.SignedAngle(ship.LookAt, to));
+                if (ang <= 20f)
+                {
+                    RaycastHit2D h = Physics2D.Raycast(ship.Position, to.normalized, to.magnitude);
+                    if (h.collider == null) return true;
+                }
+            }
+            return false;
+        }
+
         private string EncodeState(SpaceShipView ship, GameData data)
         {
             WayPointView target = FindNextTarget(ship, data);
             string distBucket = "noTarget";
             string angleBucket = "na";
-            string threat = "none";
-
             if (target != null)
             {
                 float d = (target.Position - ship.Position).magnitude;
                 if (d <= target.Radius * _nearFactor) distBucket = "near";
                 else if (d <= target.Radius * _midFactor) distBucket = "mid";
                 else distBucket = "far";
-
                 float desired = Mathf.Atan2((target.Position - ship.Position).y, (target.Position - ship.Position).x) * Mathf.Rad2Deg;
                 float angDiff = Mathf.DeltaAngle(ship.Orientation, desired);
-                if (Mathf.Abs(angDiff) <= 20f) angleBucket = "front";
-                else if (angDiff > 0) angleBucket = "left"; else angleBucket = "right";
+                if (Mathf.Abs(angDiff) <= 20f) angleBucket = "front"; else if (angDiff > 0) angleBucket = "left"; else angleBucket = "right";
             }
-
-            AsteroidView a = DetectThreat(ship, data);
-            if (a != null) threat = "threat";
-
-            // --- ENEMY: nearest opposing spaceship ---
-            string enemyDist = "none";
-            string enemyAngle = "na";
-            string enemyHasShot = "no";
-            if (data != null && data.SpaceShips != null && data.SpaceShips.Count > 0)
+            var fan = SampleFan(ship);
+            StringBuilder fanKey = new StringBuilder();
+            for (int i = 0; i < fan.Length; i++)
             {
-                SpaceShipView nearestEnemy = null; float best = float.MaxValue;
-                foreach (SpaceShipView sv in data.SpaceShips)
-                {
-                    if (sv == null) continue;
-                    if (sv.Owner == ship.Owner) continue; // skip self / team
-                    float d = (sv.Position - ship.Position).magnitude;
-                    if (d < best) { best = d; nearestEnemy = sv; }
-                }
-                if (nearestEnemy != null)
-                {
-                    float r = Mathf.Max(0.001f, ship.Radius);
-                    if (best <= r * 3f) enemyDist = "near";
-                    else if (best <= r * 6f) enemyDist = "mid";
-                    else enemyDist = "far";
-
-                    float desiredE = Mathf.Atan2((nearestEnemy.Position - ship.Position).y, (nearestEnemy.Position - ship.Position).x) * Mathf.Rad2Deg;
-                    float angDiffE = Mathf.DeltaAngle(ship.Orientation, desiredE);
-                    if (Mathf.Abs(angDiffE) <= 20f) enemyAngle = "front";
-                    else if (angDiffE > 0) enemyAngle = "left"; else enemyAngle = "right";
-
-                    enemyHasShot = nearestEnemy.HasShot ? "yes" : "no";
-                }
+                string hit = fan[i].hit ? "1" : "0";
+                string distb = fan[i].dist <= fanRange * 0.33f ? "near" : (fan[i].dist <= fanRange * 0.66f ? "mid" : "far");
+                string angb = fan[i].normalVelAngle <= 30f ? "aligned" : (fan[i].normalVelAngle <= 80f ? "partial" : "away");
+                fanKey.Append($"f{i}:{hit}:{distb}:{angb}|");
             }
-
-            // --- MINE: nearest mine ---
-            string mineDist = "none";
-            string mineActive = "na";
-            if (data != null && data.Mines != null && data.Mines.Count > 0)
-            {
-                MineView nearestMine = null; float bestM = float.MaxValue;
-                foreach (MineView mv in data.Mines)
-                {
-                    if (mv == null) continue;
-                    float d = (mv.Position - ship.Position).magnitude;
-                    if (d < bestM) { bestM = d; nearestMine = mv; }
-                }
-                if (nearestMine != null)
-                {
-                    float r = Mathf.Max(0.001f, ship.Radius);
-                    if (bestM <= r * 3f) mineDist = "near";
-                    else if (bestM <= r * 6f) mineDist = "mid";
-                    else mineDist = "far";
-
-                    mineActive = nearestMine.IsActive ? "active" : "inactive";
-                }
-            }
-
-            // assemble full key: waypoint|angle|threat|enemyDist|enemyAngle|enemyShot|mineDist|mineActive
-            return string.Join("|", distBucket, angleBucket, threat, enemyDist, enemyAngle, enemyHasShot, mineDist, mineActive);
-        }
-
-        // Map action index (0..35) to InputData (thrust, orientation, weapon)
-        // encoding: index = thrustIndex * (3*4) + steerIndex * 4 + weaponIndex
-        // thrustIndex in [0..2], steerIndex in [0..2], weaponIndex in [0..3]
-        // weaponIndex: 0 = none, 1 = shoot, 2 = dropMine, 3 = fireShockwave
-        private InputData ActionToInput(int action, SpaceShipView ship, GameData data)
-        {
-            int ai = Mathf.Clamp(action, 0, Mathf.Max(0, 3 * 3 * 4 - 1));
-            int ti = ai / (3 * 4); // thrust index (0..2)
-            int rem = ai % (3 * 4);
-            int si = rem / 4; // steer index (0..2)
-            int wi = rem % 4; // weapon index (0..3)
-            float thrust = thrustLevels[Mathf.Clamp(ti, 0, thrustLevels.Length - 1)];
-
-            // compute base orientation towards target or keep current
-            WayPointView target = FindNextTarget(ship, data);
-            float baseOrient = ship.Orientation;
+            string bestCpKey = "none";
             if (target != null)
             {
-                baseOrient = Mathf.Atan2((target.Position - ship.Position).y, (target.Position - ship.Position).x) * Mathf.Rad2Deg;
+                float cpd = (target.Position - ship.Position).magnitude;
+                string cpdb = cpd <= target.Radius * _nearFactor ? "near" : (cpd <= target.Radius * _midFactor ? "mid" : "far");
+                float desired = Mathf.Atan2((target.Position - ship.Position).y, (target.Position - ship.Position).x) * Mathf.Rad2Deg;
+                float angDiff = Mathf.DeltaAngle(ship.Orientation, desired);
+                string cpang = Mathf.Abs(angDiff) <= 20f ? "front" : (angDiff > 0 ? "left" : "right");
+                float heur = (1f / (1f + cpd)) + (target.Owner == ship.Owner ? -0.5f : 1f);
+                string heurB = heur >= 1f ? "high" : (heur >= 0f ? "mid" : "low");
+                bestCpKey = $"cp:{cpdb}:{heurB}:{cpang}";
             }
-
-            float desiredOrient = baseOrient + steerAngles[Mathf.Clamp(si, 0, steerAngles.Length - 1)];
-
-            // if threat present, override to avoid
-            AsteroidView ast = DetectThreat(ship, data);
-            if (ast != null)
+            var bulletThreat = NearestBulletThreat(ship, data);
+            var mineThreat = NearestMineThreat(ship, data);
+            string bulletKey = $"b:{(bulletThreat.dist < 1e19f ? (bulletThreat.dist <= ship.Radius * 3 ? "near" : "far") : "none")}:{(bulletThreat.willHit ? "will" : "nowill")}";
+            string mineKey = $"m:{(mineThreat.dist < 1e19f ? (mineThreat.dist <= ship.Radius * 3 ? "near" : "far") : "none")}:{(mineThreat.willTrigger ? "will" : "nowill")}";
+            string energySelf = "mid"; float e = Mathf.Clamp01(ship.Energy);
+            if (e >= energyHighThreshold) energySelf = "high"; else if (e <= energyLowThreshold) energySelf = "low";
+            string enemyEnergy = "none", enemyDist = "none", enemyAngle = "na", enemyHasShot = "no";
+            if (data != null && data.SpaceShips != null)
             {
-                Vector2 toAst = ast.Position - ship.Position;
-                float side = Mathf.Sign(Vector2.SignedAngle(ship.LookAt, toAst));
-                Vector2 avoidDir = Quaternion.Euler(0, 0, -side * 90f) * ship.LookAt;
-                desiredOrient = Mathf.Atan2(avoidDir.y, avoidDir.x) * Mathf.Rad2Deg;
-                thrust = Mathf.Min(thrust, 0.5f); // slow down a bit when avoiding
+                SpaceShipView ne = null; float bd = float.MaxValue;
+                foreach (var sv in data.SpaceShips)
+                { if (sv == null || sv.Owner == ship.Owner) continue; float d = (sv.Position - ship.Position).magnitude; if (d < bd) { bd = d; ne = sv; } }
+                if (ne != null)
+                {
+                    float r = Mathf.Max(0.001f, ship.Radius);
+                    if (bd <= r * 3f) enemyDist = "near"; else if (bd <= r * 6f) enemyDist = "mid"; else enemyDist = "far";
+                    float desiredE = Mathf.Atan2((ne.Position - ship.Position).y, (ne.Position - ship.Position).x) * Mathf.Rad2Deg;
+                    float angDiffE = Mathf.DeltaAngle(ship.Orientation, desiredE);
+                    if (Mathf.Abs(angDiffE) <= 20f) enemyAngle = "front"; else if (angDiffE > 0) enemyAngle = "left"; else enemyAngle = "right";
+                    float ee = Mathf.Clamp01(ne.Energy); enemyEnergy = ee >= energyHighThreshold ? "high" : (ee <= energyLowThreshold ? "low" : "mid");
+                    enemyHasShot = ne.HasShot ? "yes" : "no";
+                }
             }
+            int myScore = ship.Score, myHitScore = ship.HitScore, myWpScore = ship.WaypointScore;
+            int oppScore = 0, oppHitScore = 0, oppWpScore = 0;
+            if (data != null && data.SpaceShips != null)
+            { foreach (var sv in data.SpaceShips) { if (sv == null || sv.Owner == ship.Owner) continue; oppScore = sv.Score; oppHitScore = sv.HitScore; oppWpScore = sv.WaypointScore; break; } }
+            string scoreDiff = (myScore - oppScore) >= 5 ? "ahead" : ((myScore - oppScore) <= -5 ? "behind" : "close");
+            string hitDiff = (myHitScore - oppHitScore) >= 3 ? "ahead" : ((myHitScore - oppHitScore) <= -3 ? "behind" : "close");
+            string wpDiff = (myWpScore - oppWpScore) >= 3 ? "ahead" : ((myWpScore - oppWpScore) <= -3 ? "behind" : "close");
+            string timeKey = "mid"; if (data != null) { float t = data.timeLeft; if (t >= 40f) timeKey = "early"; else if (t <= 20f) timeKey = "late"; }
+            string enemyLos = EnemyInLineOfSight(ship, data) ? "yes" : "no";
+            return string.Join("|", distBucket, angleBucket, enemyDist, enemyAngle, enemyHasShot, fanKey.ToString(), bestCpKey, bulletKey, mineKey,
+                                energySelf, enemyEnergy, enemyLos, scoreDiff, hitDiff, wpDiff, timeKey);
+        }
 
-            // if action includes a weapon, reduce thrust to conserve energy so the ship can actually fire
-            if (wi != 0)
+        private InputData ActionToInput(int action, SpaceShipView ship, GameData data)
+        {
+            int ai = Mathf.Clamp(action, 0, 3 * 3 * 4 - 1);
+            int ti = ai / (3 * 4); int rem = ai % (3 * 4); int si = rem / 4; int wi = rem % 4;
+            float thrust = thrustLevels[Mathf.Clamp(ti, 0, thrustLevels.Length - 1)];
+            float steer = steerAngles[Mathf.Clamp(si, 0, steerAngles.Length - 1)];
+            SpaceShipView nearestEnemy = null; float bd = float.MaxValue;
+            if (data != null && data.SpaceShips != null)
+                foreach (var sv in data.SpaceShips) { if (sv == null || sv.Owner == ship.Owner) continue; float d = (sv.Position - ship.Position).sqrMagnitude; if (d < bd) { bd = d; nearestEnemy = sv; } }
+            WayPointView target = FindNextTarget(ship, data);
+            float desiredOrient = ship.Orientation;
+            if (nearestEnemy != null && wi == 1) desiredOrient = AimingHelpers.ComputeSteeringOrient(ship, nearestEnemy.Position, steeringOvershoot);
+            else if (target != null) desiredOrient = AimingHelpers.ComputeSteeringOrient(ship, target.Position, steeringOvershoot);
+            desiredOrient += steer;
+            // assistance waypoint
+            if (target != null)
             {
-                thrust = Mathf.Min(thrust, 0.1f);
+                float dwp = (target.Position - ship.Position).magnitude;
+                if (dwp <= target.Radius * 1.25f)
+                {
+                    float desiredWp = Mathf.Atan2((target.Position - ship.Position).y, (target.Position - ship.Position).x) * Mathf.Rad2Deg;
+                    float angErrWp = Mathf.Abs(Mathf.DeltaAngle(ship.Orientation, desiredWp));
+                    if (angErrWp > 30f) thrust = Mathf.Min(thrust, 0.2f);
+                    if (dwp <= target.Radius * 0.6f) thrust = Mathf.Min(thrust, 0.35f);
+                }
             }
-
-            // ensure the ship actually has energy for the selected weapon; if not, fallback to none
             float energy = ship.Energy;
-            bool canShoot = energy >= ship.ShootEnergyCost;
+            bool canShootEnergy = energy >= ship.ShootEnergyCost;
             bool canDrop = energy >= ship.MineEnergyCost;
             bool canShock = energy >= ship.ShockwaveEnergyCost;
-            if (wi == 1 && !canShoot) { if (DebugActions) Debug.Log($"QLearner attempted SHOOT but energy={energy:F2} < cost={ship.ShootEnergyCost:F2}"); wi = 0; }
-            if (wi == 2 && !canDrop) { if (DebugActions) Debug.Log($"QLearner attempted DROP MINE but energy={energy:F2} < cost={ship.MineEnergyCost:F2}"); wi = 0; }
-            if (wi == 3 && !canShock) { if (DebugActions) Debug.Log($"QLearner attempted SHOCKWAVE but energy={energy:F2} < cost={ship.ShockwaveEnergyCost:F2}"); wi = 0; }
-
-            // weapon flags
             bool shoot = false, dropMine = false, fireShockwave = false;
-            switch (wi)
+            if (wi == 1 && nearestEnemy != null && canShootEnergy)
+                shoot = AimingHelpers.CanHit(ship, nearestEnemy.Position, nearestEnemy.Velocity, shootHitTimeTolerance);
+            else if (wi == 2 && canDrop) dropMine = true;
+            else if (wi == 3 && canShock) fireShockwave = true;
+            // évitement mine
+            var mt = NearestMineThreat(ship, data);
+            if (mt.dist < ship.Radius * 4f && data != null && data.Mines != null)
             {
-                case 1: shoot = true; break;
-                case 2: dropMine = true; break;
-                case 3: fireShockwave = true; break;
-                default: break; // 0 = none
+                MineView closest = null; float bdM = float.MaxValue;
+                foreach (var m in data.Mines)
+                { if (m == null) continue; float d = (m.Position - ship.Position).magnitude; if (d < bdM) { bdM = d; closest = m; } }
+                if (closest != null)
+                {
+                    Vector2 away = (ship.Position - closest.Position).normalized; float awayAng = Mathf.Atan2(away.y, away.x) * Mathf.Rad2Deg;
+                    desiredOrient = Mathf.LerpAngle(desiredOrient, awayAng, 0.6f); thrust = Mathf.Min(thrust, 0.5f);
+                    if (mt.willTrigger || mt.dist < ship.Radius * 2.2f)
+                    { thrust = Mathf.Min(thrust, 0.2f); if (ship.Energy < ship.ShockwaveEnergyCost) { shoot = false; dropMine = false; fireShockwave = false; } }
+                }
             }
-
+            // shockwave proximité
+            if (nearestEnemy != null && ship.Energy >= ship.ShockwaveEnergyCost)
+            {
+                float ed = (nearestEnemy.Position - ship.Position).magnitude;
+                float trigger = ship.Radius + nearestEnemy.Radius;
+                if (ed <= trigger * 1.05f)
+                { fireShockwave = true; shoot = false; dropMine = false; thrust = 0f; float toE = Mathf.Atan2((nearestEnemy.Position - ship.Position).y, (nearestEnemy.Position - ship.Position).x) * Mathf.Rad2Deg; desiredOrient = Mathf.LerpAngle(desiredOrient, toE, 0.5f); }
+            }
+            if (wi == 1 && !shoot) thrust = Mathf.Max(thrust * 0.5f, 0f);
+            var bt = NearestBulletThreat(ship, data);
+            if (bt.willHit && ship.Energy >= ship.MineEnergyCost)
+            { dropMine = true; shoot = false; fireShockwave = false; thrust = Mathf.Min(thrust, 0.1f); if (debugActions) Debug.Log($"[QL] Defensive drop-mine due to bullet threat dist={bt.dist:F2}"); }
+            int justHit = ship.HitCount - _prevHitCount;
+            if (justHit > 0 && ship.Energy >= ship.ShockwaveEnergyCost)
+            { fireShockwave = true; shoot = false; dropMine = false; thrust = 0f; if (debugActions) Debug.Log("[QL] Auto shockwave triggered after receiving hit"); }
             return new InputData(thrust, desiredOrient, shoot, dropMine, fireShockwave);
         }
-
         public override InputData UpdateInput(SpaceShipView ship, GameData data)
         {
-            if (data == null) return new InputData(0f, ship.Orientation, false, false, false);
-
+            if (_agent == null) Initialize(ship, data);
+            _shipView = ship; _data = data;
             string state = EncodeState(ship, data);
-            int action = agent.ChooseAction(state, greedy: !TrainingMode);
-
-            // perform learning from previous step
-            if (TrainingMode && prevState != null && prevAction >= 0)
+            int action = _agent.ChooseAction(state, greedy: !TrainingMode);
+            RewardDetails rd = new RewardDetails(); float reward = 0f;
+            if (_prevAction >= 0 && _prevState != null)
             {
-                // reward: change in waypoint count + change in score
-                int wayDiff = ship.WaypointScore - prevWaypoints;
-                int scoreDiff = ship.Score - prevScore;
-                int hitDiff = ship.HitCount - prevHitCount;
-
-                float reward = wayDiff * rewardPerWaypoint + scoreDiff * rewardPerScore;
-
-                // small living penalty to encourage speed
-                reward += livingPenalty;
-
-                // exploration bonuses if previous action triggered weapon usage
-                if (ship.HasShot) reward += rewardForShot;
-                if (ship.HasDroppedMine) reward += rewardForDropMine;
-                if (ship.HasFiredShockwave) reward += rewardForShockwave;
-
-                // penalty for being hit (can be negative)
-                if (hitDiff > 0) reward += hitDiff * penaltyOnHit;
-
-                // --- Energy management penalties (mana consumption) ---
+                int wpDiff = ship.WaypointScore - _prevWaypointScore; rd.wpDiff = wpDiff;
+                int scoreDiff = ship.Score - _prevScore; rd.scoreDiff = scoreDiff;
+                int hitScDiff = ship.HitScore - _prevHitScore; rd.hitScDiff = hitScDiff;
+                int gotHitDiff = ship.HitCount - _prevHitCount; rd.gotHitDiff = gotHitDiff;
+                if (wpDiff > 0) reward += rewardPerWaypoint * wpDiff;
+                if (scoreDiff > 0) reward += rewardPerScore * scoreDiff;
+                if (hitScDiff > 0) reward += rewardForHit * hitScDiff;
+                if (gotHitDiff > 0) reward += penaltyOnHit * gotHitDiff;
+                int pai = _prevAction; int pti = pai / (3 * 4); int prem = pai % (3 * 4); int psi = prem / 4; int pwi = prem % 4;
+                if (pwi == 3) { reward += rewardForShockwave; rd.shockwave = rewardForShockwave; }
+                float highPen = 0f, lowPen = 0f;
                 if (useEnergyPenalty)
                 {
-                    float e = Mathf.Clamp01(ship.Energy);
-                    if (e > energyHighThreshold)
-                    {
-                        // scale penalty with how far above threshold
-                        float factor = (e - energyHighThreshold) / Mathf.Max(1e-6f, 1f - energyHighThreshold);
-                        float pen = penaltyHighEnergy * factor;
-                        reward += pen;
-                        if (DebugActions)
-                            Debug.Log($"[QL] Energy high penalty e={e:F2} thr={energyHighThreshold:F2} -> {pen:F4}");
-                    }
-                    if (e < energyLowThreshold)
-                    {
-                        // scale penalty with how far below threshold
-                        float factor = (energyLowThreshold - e) / Mathf.Max(1e-6f, energyLowThreshold);
-                        float pen = penaltyLowEnergy * factor;
-                        reward += pen;
-                        if (DebugActions)
-                            Debug.Log($"[QL] Energy low penalty e={e:F2} thr={energyLowThreshold:F2} -> {pen:F4}");
-                    }
+                    float en = Mathf.Clamp01(ship.Energy);
+                    if (en > energyHighThreshold)
+                    { float factor = (en - energyHighThreshold) / Mathf.Max(1e-6f, 1f - energyHighThreshold); highPen = penaltyHighEnergy * factor; reward += highPen; }
+                    if (en < energyLowThreshold)
+                    { float factor = (energyLowThreshold - en) / Mathf.Max(1e-6f, energyLowThreshold); lowPen = penaltyLowEnergy * factor; reward += lowPen; }
                 }
-
-                agent.Learn(prevState, prevAction, reward, state, false);
+                reward += livingPenalty; rd.living = livingPenalty; rd.energyHighPenalty = highPen; rd.energyLowPenalty = lowPen; rd.total = reward;
+                _agent.Learn(_prevState, _prevAction, reward, state, false);
             }
-
+            _lastReward = rd;
             InputData input = ActionToInput(action, ship, data);
-
-            // debug counting
-            if (DebugActions)
+            if (debugVerbose)
             {
-                _totalActionCount++;
-                if (input.shoot || input.dropMine || input.fireShockwave) _weaponActionCount++;
-                _logTimer += Time.deltaTime;
-                if (_logTimer >= _logInterval)
+                _debugTimer += Time.deltaTime;
+                if (_debugTimer >= debugVerboseInterval)
                 {
-                    Debug.Log($"QLearningController actions: total={_totalActionCount}, weapon={_weaponActionCount}");
-                    _logTimer = 0f;
+                    _debugTimer = 0f;
+                    var sb = new StringBuilder(); sb.Append("[QL][STEP] "); sb.AppendFormat("StateHash={0} Len={1} ", state.GetHashCode(), state.Length);
+                    int ai = action; int ti = ai / (3 * 4); int rem = ai % (3 * 4); int si = rem / 4; int wi = rem % 4;
+                    sb.AppendFormat("Action={0} (thrustIdx={1} steerIdx={2} weaponIdx={3}) ", action, ti, si, wi);
+                    sb.AppendFormat("Reward={0:F3} [wp={1} sc={2} hit={3} gotHit={4} eHi={5:F3} eLo={6:F3} liv={7:F3} shkw={8:F3}] ", _lastReward.total, _lastReward.wpDiff, _lastReward.scoreDiff, _lastReward.hitScDiff, _lastReward.gotHitDiff, _lastReward.energyHighPenalty, _lastReward.energyLowPenalty, _lastReward.living, _lastReward.shockwave);
+                    sb.AppendFormat("Eps={0:F3} Alpha={1:F2} Gamma={2:F3}", _agent.Epsilon, _agent.Alpha, _agent.Gamma);
+                    Debug.Log(sb.ToString());
                 }
             }
-
-            // update previous trackers
-            prevState = state;
-            prevAction = action;
-            prevWaypoints = ship.WaypointScore;
-            prevScore = ship.Score;
-            prevHitCount = ship.HitCount;
-
+            _prevState = state; _prevAction = action; _prevWaypointScore = ship.WaypointScore; _prevScore = ship.Score; _prevHitScore = ship.HitScore; _prevHitCount = ship.HitCount;
             return input;
         }
-
-        // API utilities
-        public void SaveAgent()
-        {
-            if (agent == null) return;
-            agent.Save(SaveFileName);
-        }
-
-        public void LoadAgent()
-        {
-            if (agent == null) agent = new QLearningAgent();
-            agent.Load(SaveFileName);
-        }
-
+        public void SaveAgent() { if (_agent == null) return; _agent.Save(SaveFileName); }
+        public void LoadAgent() { if (_agent == null) _agent = new QLearningAgent(); _agent.Load(SaveFileName); }
         public void ApplyHyperParamsAndReset(float alpha, float gamma, float epsilonStart, float epsilonDecay, float minEpsilon, bool resetTable)
         {
+            if (_agent == null || resetTable) _agent = new QLearningAgent();
             _alpha = alpha; _gamma = gamma; _epsilon = epsilonStart; _epsilonDecay = epsilonDecay; _minEpsilon = minEpsilon;
-            if (agent == null || resetTable)
-            {
-                agent = new QLearningAgent();
-                int actionCount = 3 * 3 * 4; // keep action mapping consistent
-                agent.Initialize(actionCount, _alpha, _gamma, _epsilon);
-                agent.EpsilonDecay = _epsilonDecay;
-                agent.MinEpsilon = _minEpsilon;
-            }
-            else
-            {
-                agent.Alpha = _alpha;
-                agent.Gamma = _gamma;
-                agent.Epsilon = _epsilon;
-                agent.EpsilonDecay = _epsilonDecay;
-                agent.MinEpsilon = _minEpsilon;
-            }
+            _agent.Initialize(3 * 3 * 4, _alpha, _gamma, _epsilon); _agent.EpsilonDecay = _epsilonDecay; _agent.MinEpsilon = _minEpsilon;
         }
-
+        public void ApplyTerminalReward(float reward)
+        { if (_agent == null) return; if (_prevState != null && _prevAction >= 0) _agent.Learn(_prevState, _prevAction, reward, string.Empty, true); }
+        public void ApplyTerminalResult(bool win) { float r = win ? terminalWinReward : terminalLossPenalty; ApplyTerminalReward(r); }
     }
 }
+

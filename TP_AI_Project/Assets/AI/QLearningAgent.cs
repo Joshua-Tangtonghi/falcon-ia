@@ -49,6 +49,8 @@ namespace AI
 
         private System.Random _rnd = new System.Random();
 
+        public static bool VerboseLoad = false; // contrôle des logs de chargement
+
         public void Initialize(int actionCount, float alpha = 0.5f, float gamma = 0.99f, float epsilon = 0.2f)
         {
             ActionCount = Math.Max(1, actionCount);
@@ -137,20 +139,17 @@ namespace AI
             try
             {
                 string path = Path.Combine(Application.persistentDataPath, filename);
-                if (!File.Exists(path)) { Debug.LogWarning("Q-table file not found: " + path); return; }
+                if (!File.Exists(path)) { if (VerboseLoad) Debug.LogWarning("Q-table file not found: " + path); return; }
                 string json = File.ReadAllText(path);
-                // try to parse as new wrapper
                 QTableFile file = JsonUtility.FromJson<QTableFile>(json);
                 if (file != null && file.rows != null && file.rows.Count > 0)
                 {
-                    // populate
                     _qTable = new Dictionary<string, float[]>();
                     foreach (var row in file.rows)
                     {
                         if (row.q == null) continue;
                         _qTable[row.state] = row.q;
                     }
-                    // if metadata present, adopt actionCount and hyperparams
                     if (file.metadata != null)
                     {
                         this.ActionCount = file.metadata.actionCount;
@@ -159,16 +158,15 @@ namespace AI
                         this.Epsilon = file.metadata.epsilon;
                         this.EpsilonDecay = file.metadata.epsilonDecay;
                         this.MinEpsilon = file.metadata.minEpsilon;
-                        Debug.Log($"Loaded Q-table (metadata) actionCount={this.ActionCount} author={file.metadata.author} createdAt={file.metadata.createdAt}");
+                        if (VerboseLoad) Debug.Log($"Loaded Q-table metadata actionCount={this.ActionCount} author={file.metadata.author}");
                     }
-                    else
+                    else if (VerboseLoad)
                     {
                         Debug.Log("Loaded Q-table (no metadata) from " + path);
                     }
                 }
                 else
                 {
-                    // fallback: old format
                     QTableSerializable ser = JsonUtility.FromJson<QTableSerializable>(json);
                     _qTable = new Dictionary<string, float[]>();
                     if (ser != null && ser.rows != null)
@@ -178,9 +176,9 @@ namespace AI
                             if (row.q == null) continue;
                             _qTable[row.state] = row.q;
                         }
-                        Debug.Log("Loaded legacy Q-table from " + path);
+                        if (VerboseLoad) Debug.Log("Loaded legacy Q-table from " + path);
                     }
-                    else
+                    else if (VerboseLoad)
                     {
                         Debug.LogWarning("Unrecognized Q-table file format: " + path);
                     }
