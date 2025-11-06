@@ -917,7 +917,7 @@ MonoBehaviour:
   AutoSaveOnEnd: 0
   SaveFileName: qtable.json
   AutoRestartOnEnd: 1
-  TrainingTimeScale: 100
+  TrainingTimeScale: 50
   PersistAcrossEpisodes: 1
   AutoSaveEveryNEpisodes: 500
   MovingAverageWindow: 20
@@ -926,7 +926,7 @@ MonoBehaviour:
   EpisodesPerCandidate: 10
   MaxGenerations: 0
   ElitesToKeep: 1
-  MutationSigma: 0.12
+  MutationSigma: 0.5
   AlphaRange: {x: 0.3, y: 0.7}
   GammaRange: {x: 0.95, y: 0.995}
   EpsilonStartRange: {x: 0.2, y: 0.5}
@@ -2784,7 +2784,7 @@ PrefabInstance:
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
       propertyPath: _epsilon
-      value: 0.3
+      value: 0.7
       objectReference: {fileID: 0}
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
@@ -2804,7 +2804,7 @@ PrefabInstance:
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
       propertyPath: debugActions
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
@@ -2813,8 +2813,28 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
+      propertyPath: penaltyOnHit
+      value: -1
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
       propertyPath: rewardForHit
-      value: 1.1
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: livingPenalty
+      value: -0.05
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: rewardPerScore
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: penaltyLowEnergy
+      value: -0.1
       objectReference: {fileID: 0}
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
@@ -2823,8 +2843,28 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
+      propertyPath: encourageShooting
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: penaltyHighEnergy
+      value: -0.01
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
       propertyPath: rewardPerWaypoint
-      value: 1.2
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: penaltyUselessMine
+      value: -0.2
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: _avoidAheadDistance
+      value: 6
       objectReference: {fileID: 0}
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
