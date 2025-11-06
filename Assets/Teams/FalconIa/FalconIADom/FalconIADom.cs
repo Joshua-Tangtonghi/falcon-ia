@@ -16,20 +16,6 @@ namespace Teams.ExampleTeam
             Vector2 dir = toPos - fromPos;
             return Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
         }
-        private Vector2 FindNearestFreeWaypointPosition (SpaceShipView ship, GameData gameData)
-        {
-            WayPointView closestFreeWaypoint = null; float closestFreeWaypointDistance = float.PositiveInfinity;
-            foreach (WayPointView waypoint in gameData.WayPoints)
-            {
-                float distanceBetweenWaypointShip = Vector2.Distance(waypoint.Position, ship.Position);
-                if (distanceBetweenWaypointShip < closestFreeWaypointDistance && waypoint.Owner != ship.Owner)
-                {
-                    closestFreeWaypoint = waypoint;
-                    closestFreeWaypointDistance = distanceBetweenWaypointShip;
-                }
-            }
-            return closestFreeWaypoint.Position;
-        }
         private InputData GoToPosition(SpaceShipView ship, Vector2 targetPosition, float thrust)
         {
             // --- ANTICIPATION : prédit la position future de la cible en fonction de la vitesse actuelle du vaisseau ---
@@ -55,15 +41,15 @@ namespace Teams.ExampleTeam
 
             return data;
         }
-
-        private InputData LookAt(SpaceShipView ship,Vector2 targetPosition)
-        {
-            return new InputData(0f, ComputeOrientationTowards(ship.Position, targetPosition), false, false, false);
-        }
         private InputData EnemyNextPosition(SpaceShipView ship, SpaceShipView enemyShip)
         {
             InputData data = LookAt(ship, enemyShip.Position);
             return data;
+        }
+
+        private InputData LookAt(SpaceShipView ship,Vector2 targetPosition)
+        {
+            return new InputData(0f, ComputeOrientationTowards(ship.Position, targetPosition), false, false, false);
         }
         private InputData Shoot()
         {
@@ -92,6 +78,22 @@ namespace Teams.ExampleTeam
         {
             return new InputData(0f, 0f, false, false, true);
         }
+        private Vector2 FindNearestFreeWaypointPosition(SpaceShipView ship, GameData gameData)
+        {
+            WayPointView closestFreeWaypoint = null; float closestFreeWaypointDistance = float.PositiveInfinity;
+            foreach (WayPointView waypoint in gameData.WayPoints)
+            {
+                float distanceBetweenWaypointShip = Vector2.Distance(waypoint.Position, ship.Position);
+                if (distanceBetweenWaypointShip < closestFreeWaypointDistance && waypoint.Owner != ship.Owner)
+                {
+                    closestFreeWaypoint = waypoint;
+                    closestFreeWaypointDistance = distanceBetweenWaypointShip;
+                }
+            }
+            return closestFreeWaypoint.Position;
+        }
+        //private Vector2 FindNearestEnemyWaypointPosition(SpaceShipView ship, GameData gameData)
+
     }
 
 }
