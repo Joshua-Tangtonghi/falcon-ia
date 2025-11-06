@@ -913,25 +913,25 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   controller: {fileID: 1202758643}
-  AutoLoad: 0
+  AutoLoad: 1
   AutoSaveOnEnd: 0
   SaveFileName: qtable.json
   AutoRestartOnEnd: 1
-  TrainingTimeScale: 50
+  TrainingTimeScale: 100
   PersistAcrossEpisodes: 1
   AutoSaveEveryNEpisodes: 500
   MovingAverageWindow: 20
   EvolutionaryEnabled: 1
-  PopulationSize: 6
-  EpisodesPerCandidate: 3
+  PopulationSize: 8
+  EpisodesPerCandidate: 10
   MaxGenerations: 0
   ElitesToKeep: 1
-  MutationSigma: 0.15
-  AlphaRange: {x: 0.05, y: 1}
-  GammaRange: {x: 0.5, y: 0.9999}
-  EpsilonStartRange: {x: 0.01, y: 1}
-  EpsilonDecayRange: {x: 0.9, y: 0.99999}
-  MinEpsilonRange: {x: 0, y: 0.2}
+  MutationSigma: 0.12
+  AlphaRange: {x: 0.3, y: 0.7}
+  GammaRange: {x: 0.95, y: 0.995}
+  EpsilonStartRange: {x: 0.2, y: 0.5}
+  EpsilonDecayRange: {x: 0.999, y: 0.99999}
+  MinEpsilonRange: {x: 0.02, y: 0.08}
   SaveOnlyOneBest: 1
 --- !u!4 &375097848
 Transform:
@@ -2783,6 +2783,16 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
+      propertyPath: _epsilon
+      value: 0.3
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: _minEpsilon
+      value: 0.05
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
       propertyPath: DebugActions
       value: 1
       objectReference: {fileID: 0}
@@ -2793,23 +2803,18 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
-      propertyPath: circleRadius
-      value: 4
+      propertyPath: debugActions
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
-      propertyPath: penaltyOnHit
-      value: -1
+      propertyPath: debugVerbose
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
-      propertyPath: livingPenalty
-      value: -0.05
-      objectReference: {fileID: 0}
-    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
-        type: 3}
-      propertyPath: penaltyLowEnergy
-      value: -0.1
+      propertyPath: rewardForHit
+      value: 1.1
       objectReference: {fileID: 0}
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
@@ -2818,23 +2823,13 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
-      propertyPath: penaltyHighEnergy
-      value: -0.1
+      propertyPath: rewardPerWaypoint
+      value: 1.2
       objectReference: {fileID: 0}
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
-      propertyPath: terminalWinReward
-      value: 1.5
-      objectReference: {fileID: 0}
-    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
-        type: 3}
-      propertyPath: energyHighThreshold
-      value: 0.95
-      objectReference: {fileID: 0}
-    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
-        type: 3}
-      propertyPath: shootHitTimeTolerance
-      value: 0.5
+      propertyPath: steerAngles.Array.size
+      value: 3
       objectReference: {fileID: 0}
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
@@ -2843,7 +2838,52 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
         type: 3}
+      propertyPath: 'steerAngles.Array.data[0]'
+      value: -30
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: 'steerAngles.Array.data[1]'
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: 'steerAngles.Array.data[2]'
+      value: 30
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: 'steerAngles.Array.data[3]'
+      value: 10
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: 'steerAngles.Array.data[4]'
+      value: 20
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: 'thrustLevels.Array.data[0]'
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
       propertyPath: 'thrustLevels.Array.data[1]'
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: 'thrustLevels.Array.data[2]'
+      value: 0.6
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: 'thrustLevels.Array.data[3]'
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 327606859668409216, guid: fad10f8df44b9c24ca15faf85c1d5ce4,
+        type: 3}
+      propertyPath: 'thrustLevels.Array.data[4]'
       value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 2584746060613139601, guid: fad10f8df44b9c24ca15faf85c1d5ce4,

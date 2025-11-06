@@ -1,6 +1,5 @@
 ﻿using UnityEngine;
 using DoNotModify;
-using System;
 using System.Text;
 
 namespace AI
@@ -21,6 +20,11 @@ namespace AI
         [SerializeField] private float rewardForHit = 1.0f; // reward when opponent is hit (HitScore increases)
         [SerializeField] private float penaltyOnHit = -0.5f; // our hit count increases
         [SerializeField] private float rewardForShockwave = 0.3f; // nouveau: encourager l’usage de la shockwave
+        [SerializeField] private float rewardForShootAttempt = 0.15f; // léger bonus pour tirer (exploration)
+        [SerializeField] private float bonusShootHit = 0.8f; // bonus additionnel quand un tir a conduit à un hit
+        [SerializeField] private float penaltyUselessMine = -0.3f; // pénalité si mine posée sans menace ni impact
+        [SerializeField] private bool encourageShooting = true;
+        [SerializeField] private bool penalizeUselessMines = true;
 
         [Header("Discretization / behaviour")]
         [SerializeField] private float _nearFactor = 1.5f;
@@ -75,9 +79,6 @@ namespace AI
         private int _prevHitScore;
         private int _prevHitCount;
 
-        private SpaceShipView _shipView;
-        private GameData _data;
-
         private struct FanHit { public bool hit; public float dist; public float normalVelAngle; }
 
         private struct RewardDetails
@@ -103,9 +104,6 @@ namespace AI
 
         public override void Initialize(SpaceShipView spaceship, GameData data)
         {
-            _shipView = spaceship;
-            _data = data;
-
             _agent = new QLearningAgent();
             int actionCount = 3 * 3 * 4; // thrust x steer x weapon
             _agent.Initialize(actionCount, _alpha, _gamma, _epsilon);
@@ -321,7 +319,13 @@ namespace AI
             bool canShock = energy >= ship.ShockwaveEnergyCost;
             bool shoot = false, dropMine = false, fireShockwave = false;
             if (wi == 1 && nearestEnemy != null && canShootEnergy)
-                shoot = AimingHelpers.CanHit(ship, nearestEnemy.Position, nearestEnemy.Velocity, shootHitTimeTolerance);
+            {
+                // Autoriser le tir même si CanHit échoue pour explorer plus la stratégie de tir
+                shoot = true;
+                // Si vraiment très faible chance (orientation très mauvaise) on peut garder la restriction
+                if (!AimingHelpers.CanHit(ship, nearestEnemy.Position, nearestEnemy.Velocity, shootHitTimeTolerance) && !encourageShooting)
+                    shoot = false;
+            }
             else if (wi == 2 && canDrop) dropMine = true;
             else if (wi == 3 && canShock) fireShockwave = true;
             // évitement mine
@@ -353,13 +357,35 @@ namespace AI
             { dropMine = true; shoot = false; fireShockwave = false; thrust = Mathf.Min(thrust, 0.1f); if (debugActions) Debug.Log($"[QL] Defensive drop-mine due to bullet threat dist={bt.dist:F2}"); }
             int justHit = ship.HitCount - _prevHitCount;
             if (justHit > 0 && ship.Energy >= ship.ShockwaveEnergyCost)
-            { fireShockwave = true; shoot = false; dropMine = false; thrust = 0f; if (debugActions) Debug.Log("[QL] Auto shockwave triggered after receiving hit"); }
+            {
+                fireShockwave = true; shoot = false; dropMine = false; thrust = 0f;
+                if (debugActions) Debug.Log("[QL] Auto shockwave triggered after receiving hit");
+            }
+
+            // Évitement avant (réintègre _avoidAheadDistance / _avoidConeAngle)
+            if (fanRays > 0 && _avoidAheadDistance > 0f)
+            {
+                var fanHits = SampleFan(ship);
+                float halfCone = _avoidConeAngle * 0.5f;
+                bool obstacleAhead = false;
+                for (int i = 0; i < fanHits.Length; i++)
+                {
+                    float t = fanHits.Length == 1 ? 0f : (float)i / (fanHits.Length - 1);
+                    float relAng = Mathf.Lerp(-fanAngle * 0.5f, fanAngle * 0.5f, t); // angle relatif du rayon
+                    if (Mathf.Abs(relAng) <= halfCone && fanHits[i].hit && fanHits[i].dist < _avoidAheadDistance)
+                    { obstacleAhead = true; break; }
+                }
+                if (obstacleAhead)
+                {
+                    thrust = Mathf.Min(thrust, 0.3f);
+                    if (debugActions) Debug.Log("[QL] Avoidance: obstacle ahead -> thrust reduced");
+                }
+            }
             return new InputData(thrust, desiredOrient, shoot, dropMine, fireShockwave);
         }
         public override InputData UpdateInput(SpaceShipView ship, GameData data)
         {
             if (_agent == null) Initialize(ship, data);
-            _shipView = ship; _data = data;
             string state = EncodeState(ship, data);
             int action = _agent.ChooseAction(state, greedy: !TrainingMode);
             RewardDetails rd = new RewardDetails(); float reward = 0f;
@@ -373,8 +399,22 @@ namespace AI
                 if (scoreDiff > 0) reward += rewardPerScore * scoreDiff;
                 if (hitScDiff > 0) reward += rewardForHit * hitScDiff;
                 if (gotHitDiff > 0) reward += penaltyOnHit * gotHitDiff;
-                int pai = _prevAction; int pti = pai / (3 * 4); int prem = pai % (3 * 4); int psi = prem / 4; int pwi = prem % 4;
+                int pwi = _prevAction % 4;
                 if (pwi == 3) { reward += rewardForShockwave; rd.shockwave = rewardForShockwave; }
+                if (pwi == 1 && encourageShooting)
+                {
+                    reward += rewardForShootAttempt;
+                    if (hitScDiff > 0) reward += bonusShootHit;
+                }
+                if (pwi == 2 && penalizeUselessMines)
+                {
+                    bool noHit = hitScDiff == 0;
+                    bool notHitSelf = gotHitDiff == 0;
+                    var bulletThreatPrev = NearestBulletThreat(ship, data);
+                    bool noBulletDanger = !bulletThreatPrev.willHit && bulletThreatPrev.dist > ship.Radius * 6f;
+                    if (noHit && notHitSelf && noBulletDanger)
+                        reward += penaltyUselessMine;
+                }
                 float highPen = 0f, lowPen = 0f;
                 if (useEnergyPenalty)
                 {
