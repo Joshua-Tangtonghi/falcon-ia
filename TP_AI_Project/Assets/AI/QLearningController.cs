@@ -16,11 +16,11 @@ namespace AI
 
         [Header("Rewards & penalties")]
         [SerializeField] private float rewardPerWaypoint = 1.0f;
-        [SerializeField] private float rewardPerScore = 0.5f;
+        [SerializeField] private float rewardPerScore = 1.0f; // augmenter l'incitation au score
         [SerializeField] private float livingPenalty = -0.01f;
-        [SerializeField] private float rewardForHit = 1.0f; // reward when opponent is hit (HitScore increases)
+        [SerializeField] private float rewardForHit = 2.0f; // augmenter la récompense quand on touche
         [SerializeField] private float penaltyOnHit = -0.5f; // our hit count increases
-        [SerializeField] private float rewardForShockwave = 0.3f; // nouveau: encourager l’usage de la shockwave
+        [SerializeField] private float rewardForShockwave = 0.05f; // réduire l'incitation à la shockwave
 
         [Header("Discretization / behaviour")]
         [SerializeField] private float _nearFactor = 1.5f;
@@ -52,7 +52,7 @@ namespace AI
 
         [Header("Aiming Helpers")]
         [SerializeField] private float steeringOvershoot = 1.2f;
-        [SerializeField] private float shootHitTimeTolerance = 0.25f;
+        [SerializeField] private float shootHitTimeTolerance = 0.5f; // tolérance augmentée pour favoriser le tir
 
         [Header("Terminal rewards")]
         [SerializeField] private float terminalWinReward = 1.0f;
@@ -100,6 +100,16 @@ namespace AI
         public float Epsilon { get => _epsilon; set { _epsilon = value; if (_agent != null) _agent.Epsilon = value; } }
         public float EpsilonDecay { get => _epsilonDecay; set { _epsilonDecay = value; if (_agent != null) _agent.EpsilonDecay = value; } }
         public float MinEpsilon { get => _minEpsilon; set { _minEpsilon = value; if (_agent != null) _agent.MinEpsilon = value; } }
+
+        // Exposed reward properties
+        public float RewardPerWaypoint { get => rewardPerWaypoint; set => rewardPerWaypoint = value; }
+        public float RewardPerScore { get => rewardPerScore; set => rewardPerScore = value; }
+        public float RewardForHit { get => rewardForHit; set => rewardForHit = value; }
+        public float RewardForShockwave { get => rewardForShockwave; set => rewardForShockwave = value; }
+        public float PenaltyOnHit { get => penaltyOnHit; set => penaltyOnHit = value; }
+        public float LivingPenalty { get => livingPenalty; set => livingPenalty = value; }
+        public float TerminalWinReward { get => terminalWinReward; set => terminalWinReward = value; }
+        public float TerminalLossPenalty { get => terminalLossPenalty; set => terminalLossPenalty = value; }
 
         public override void Initialize(SpaceShipView spaceship, GameData data)
         {
@@ -320,8 +330,25 @@ namespace AI
             bool canDrop = energy >= ship.MineEnergyCost;
             bool canShock = energy >= ship.ShockwaveEnergyCost;
             bool shoot = false, dropMine = false, fireShockwave = false;
+            // Tir: autoriser le tir si l'agent peut potentiellement toucher ou si l'ennemi est en vue
             if (wi == 1 && nearestEnemy != null && canShootEnergy)
-                shoot = AimingHelpers.CanHit(ship, nearestEnemy.Position, nearestEnemy.Velocity, shootHitTimeTolerance);
+            {
+                bool canHit = AimingHelpers.CanHit(ship, nearestEnemy.Position, nearestEnemy.Velocity, shootHitTimeTolerance);
+                float angToEnemy = Mathf.Abs(Mathf.DeltaAngle(ship.Orientation, Mathf.Atan2((nearestEnemy.Position - ship.Position).y, (nearestEnemy.Position - ship.Position).x) * Mathf.Rad2Deg));
+                bool enemyLos = EnemyInLineOfSight(ship, data);
+                // tirer si on peut frapper, si l'ennemi est en ligne de vue, ou si l'angle est faible (visée approximative)
+                if (canHit || enemyLos || angToEnemy <= 15f)
+                {
+                    shoot = true;
+                }
+                else
+                {
+                    // orienter vers l'ennemi pour préparer le tir
+                    desiredOrient = AimingHelpers.ComputeSteeringOrient(ship, nearestEnemy.Position, steeringOvershoot);
+                    shoot = false;
+                }
+                if (debugActions) Debug.Log($"[QL] ShootDecision canHit={canHit} los={enemyLos} ang={angToEnemy:F1} shoot={shoot}");
+            }
             else if (wi == 2 && canDrop) dropMine = true;
             else if (wi == 3 && canShock) fireShockwave = true;
             // évitement mine
