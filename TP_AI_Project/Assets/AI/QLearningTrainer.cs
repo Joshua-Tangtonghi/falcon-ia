@@ -261,7 +261,38 @@ namespace AI
 
             controller.SaveFileName = _current.fileName;
             controller.TrainingMode = true;
-            bool reset = _current.episodesRun == 0;
+
+            // ========== FIX CRITIQUE ==========
+            // NE JAMAIS reset la Q-table entre les épisodes du même candidat !
+            // L'agent DOIT garder sa mémoire pour apprendre
+            bool reset = false;
+
+            // Seulement au tout premier épisode du candidat, charger ou créer la Q-table
+            if (_current.episodesRun == 0)
+            {
+                string path = System.IO.Path.Combine(Application.persistentDataPath, _current.fileName);
+                if (System.IO.File.Exists(path))
+                {
+                    // Charger la Q-table existante (si on reprend l'entraînement)
+                    Debug.Log($"[EVOL] Loading existing Q-table for G{_currentGen} C{_current.index}");
+                    controller.LoadAgent();
+                    reset = false; // Ne pas reset, continuer l'apprentissage
+                }
+                else
+                {
+                    // Créer une nouvelle Q-table vide
+                    Debug.Log($"[EVOL] Creating new Q-table for G{_currentGen} C{_current.index}");
+                    reset = true; // Seulement si le fichier n'existe pas
+                }
+            }
+            else
+            {
+                // Episodes 1-199 : continuer avec la même Q-table, NE PAS RESET !
+                Debug.Log($"[EVOL] Continuing learning for G{_currentGen} C{_current.index} (Episode {_current.episodesRun})");
+                reset = false;
+            }
+            // ==================================
+
             controller.ApplyHyperParamsAndReset(_current.alpha, _current.gamma, _current.epsStart, _current.epsDecay, _current.minEps, reset);
 
             if (EvolveRewards)
@@ -276,7 +307,7 @@ namespace AI
                 controller.TerminalLossPenalty = _current.terminalLossPenalty;
             }
 
-            Debug.Log($"[EVOL] G{_currentGen} C{_current.index}: α={_current.alpha:F3} γ={_current.gamma:F4} ε={_current.epsStart:F3} RwdHit={_current.rewardForHit:F2} TermWin={_current.terminalWinReward:F2}");
+            Debug.Log($"[EVOL] G{_currentGen} C{_current.index}: α={_current.alpha:F3} γ={_current.gamma:F4} ε={_current.epsStart:F3} RwdHit={_current.rewardForHit:F2} TermWin={_current.terminalWinReward:F2} Episodes={_current.episodesRun}/200 Reset={reset}");
         }
 
         private void HandleEvolutionProgression()
