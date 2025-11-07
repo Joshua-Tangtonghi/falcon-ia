@@ -917,12 +917,12 @@ MonoBehaviour:
   AutoSaveOnEnd: 1
   SaveFileName: qtable.json
   AutoRestartOnEnd: 1
-  TrainingTimeScale: 100
+  TrainingTimeScale: 1
   AutoSaveEveryNEpisodes: 10
   MovingAverageWindow: 20
   PersistAcrossEpisodes: 1
-  PreserveTimeScaleAcrossReloads: 1
-  ResetTimeScaleOnReload: 100
+  PreserveTimeScaleAcrossReloads: 0
+  ResetTimeScaleOnReload: 1
 --- !u!4 &375097848
 Transform:
   m_ObjectHideFlags: 0
